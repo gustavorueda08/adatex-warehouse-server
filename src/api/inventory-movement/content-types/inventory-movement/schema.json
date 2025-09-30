@@ -1,0 +1,92 @@
+{
+  "kind": "collectionType",
+  "collectionName": "inventory_movements",
+  "info": {
+    "singularName": "inventory-movement",
+    "pluralName": "inventory-movements",
+    "displayName": "InventoryMovement"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "type": {
+      "type": "enumeration",
+      "required": true,
+      "enum": [
+        "in",
+        "return",
+        "out",
+        "transfer",
+        "adjustment",
+        "reserve",
+        "unreserve"
+      ]
+    },
+    "quantity": {
+      "type": "decimal",
+      "required": true
+    },
+    "balanceBefore": {
+      "type": "decimal",
+      "required": false
+    },
+    "balanceAfter": {
+      "type": "decimal",
+      "required": false
+    },
+    "reference": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "text"
+    },
+    "notes": {
+      "type": "text"
+    },
+    "isVerified": {
+      "type": "boolean",
+      "default": false
+    },
+    "verifiedAt": {
+      "type": "datetime"
+    },
+    "sourceWarehouse": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::warehouse.warehouse",
+      "inversedBy": "sourceMovements"
+    },
+    "destinationWarehouse": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::warehouse.warehouse",
+      "inversedBy": "destinationMovements"
+    },
+    "order": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::order.order",
+      "inversedBy": "movements"
+    },
+    "orderProduct": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::order-product.order-product",
+      "inversedBy": "movements"
+    },
+    "item": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::item.item",
+      "inversedBy": "movements"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "movements"
+    }
+  }
+}

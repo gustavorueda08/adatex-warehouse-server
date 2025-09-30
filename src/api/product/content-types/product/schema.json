@@ -1,0 +1,74 @@
+{
+  "kind": "collectionType",
+  "collectionName": "products",
+  "info": {
+    "singularName": "product",
+    "pluralName": "products",
+    "displayName": "Product"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "code": {
+      "type": "uid",
+      "required": true
+    },
+    "description": {
+      "type": "text"
+    },
+    "unit": {
+      "type": "enumeration",
+      "enum": [
+        "kg",
+        "m",
+        "unit",
+        "piece"
+      ]
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "items": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::item.item",
+      "mappedBy": "product"
+    },
+    "orderProducts": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order-product.order-product",
+      "mappedBy": "product"
+    },
+    "suppliers": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::supplier.supplier",
+      "inversedBy": "products"
+    },
+    "siigoId": {
+      "type": "uid"
+    },
+    "priceList": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::price.price",
+      "mappedBy": "product"
+    },
+    "unitsPerPackage": {
+      "type": "integer",
+      "default": 1
+    },
+    "barcode": {
+      "type": "uid",
+      "required": true
+    }
+  }
+}

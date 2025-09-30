@@ -1,0 +1,91 @@
+{
+  "kind": "collectionType",
+  "collectionName": "order_products",
+  "info": {
+    "singularName": "order-product",
+    "pluralName": "order-products",
+    "displayName": "OrderProduct"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "requestedQuantity": {
+      "type": "decimal",
+      "default": 0
+    },
+    "requestedPackages": {
+      "type": "integer",
+      "default": 0
+    },
+    "confirmedQuantity": {
+      "type": "decimal",
+      "default": 0
+    },
+    "deliveredQuantity": {
+      "type": "decimal",
+      "default": 0
+    },
+    "unit": {
+      "type": "string"
+    },
+    "unitPrice": {
+      "type": "decimal",
+      "default": 0
+    },
+    "subTotal": {
+      "type": "decimal"
+    },
+    "ivaIncluded": {
+      "type": "boolean",
+      "default": true
+    },
+    "state": {
+      "type": "enumeration",
+      "default": "pending",
+      "enum": [
+        "pending",
+        "completed"
+      ]
+    },
+    "notes": {
+      "type": "text"
+    },
+    "product": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::product.product",
+      "inversedBy": "orderProducts"
+    },
+    "order": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::order.order",
+      "inversedBy": "orderProducts"
+    },
+    "items": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::item.item",
+      "mappedBy": "orderProducts"
+    },
+    "movements": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::inventory-movement.inventory-movement",
+      "mappedBy": "orderProduct"
+    },
+    "name": {
+      "type": "string"
+    },
+    "confirmedPackages": {
+      "type": "decimal",
+      "default": 0
+    },
+    "deliveredPackages": {
+      "type": "integer",
+      "default": 0
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "kind": "collectionType",
+  "collectionName": "warehouses",
+  "info": {
+    "singularName": "warehouse",
+    "pluralName": "warehouses",
+    "displayName": "Warehouse"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "code": {
+      "type": "uid",
+      "targetField": "name"
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "stock",
+        "transit",
+        "production",
+        "defective",
+        "printlab"
+      ]
+    },
+    "address": {
+      "type": "string"
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "isDefault": {
+      "type": "boolean",
+      "default": false
+    },
+    "items": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::item.item",
+      "mappedBy": "warehouse"
+    },
+    "sourceOrders": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order.order",
+      "mappedBy": "sourceWarehouse"
+    },
+    "destinationOrders": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order.order",
+      "mappedBy": "destinationWarehouse"
+    },
+    "sourceMovements": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::inventory-movement.inventory-movement",
+      "mappedBy": "sourceWarehouse"
+    },
+    "destinationMovements": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::inventory-movement.inventory-movement",
+      "mappedBy": "destinationWarehouse"
+    }
+  }
+}

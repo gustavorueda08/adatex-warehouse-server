@@ -1,0 +1,76 @@
+{
+  "kind": "collectionType",
+  "collectionName": "barcode_mappings",
+  "info": {
+    "singularName": "barcode-mapping",
+    "pluralName": "barcode-mappings",
+    "displayName": "BarcodeMapping"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "virtualBarcode": {
+      "type": "uid",
+      "required": true
+    },
+    "realBarcode": {
+      "type": "string"
+    },
+    "used": {
+      "type": "boolean",
+      "default": false
+    },
+    "usedAt": {
+      "type": "datetime"
+    },
+    "expiresAt": {
+      "type": "datetime"
+    },
+    "type": {
+      "type": "enumeration",
+      "default": "manual",
+      "enum": [
+        "manual",
+        "damaged",
+        "duplicate",
+        "temporary"
+      ]
+    },
+    "reason": {
+      "type": "text"
+    },
+    "originalData": {
+      "type": "json"
+    },
+    "approvedOrders": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order.order",
+      "mappedBy": "approvedBy"
+    },
+    "itemId": {
+      "type": "string",
+      "required": true
+    },
+    "usedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "usedVirtualBarcodes"
+    },
+    "generatedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "generatedVirtualBarcodes"
+    },
+    "item": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::item.item",
+      "inversedBy": "barcodeMappings"
+    }
+  }
+}

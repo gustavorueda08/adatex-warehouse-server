@@ -1,0 +1,39 @@
+{
+  "name": "adatex-warehouse-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Strapi application",
+  "scripts": {
+    "build": "strapi build",
+    "console": "strapi console",
+    "deploy": "strapi deploy",
+    "dev": "strapi develop",
+    "develop": "strapi develop",
+    "start": "strapi start",
+    "strapi": "strapi",
+    "upgrade": "npx @strapi/upgrade latest",
+    "upgrade:dry": "npx @strapi/upgrade latest --dry"
+  },
+  "dependencies": {
+    "@strapi/plugin-cloud": "5.23.3",
+    "@strapi/plugin-users-permissions": "5.23.3",
+    "@strapi/strapi": "5.23.3",
+    "better-sqlite3": "11.3.0",
+    "classnames": "^2.5.1",
+    "moment-timezone": "^0.6.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "react-router-dom": "^6.0.0",
+    "socket.io": "^4.8.1",
+    "styled-components": "^6.0.0",
+    "zod": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=18.0.0 <=22.x.x",
+    "npm": ">=6.0.0"
+  },
+  "strapi": {
+    "uuid": "054ff81b-b411-40f5-ae10-74f6e67b0912",
+    "installId": "b43eb553593e16f0014bbefe1269cba31e519fb56f3cedaf12b72683a69dd912"
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "kind": "collectionType",
+  "collectionName": "customers",
+  "info": {
+    "singularName": "customer",
+    "pluralName": "customers",
+    "displayName": "Customer"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "email": {
+      "type": "string"
+    },
+    "phone": {
+      "type": "string"
+    },
+    "address": {
+      "type": "text"
+    },
+    "city": {
+      "type": "string"
+    },
+    "creditLimit": {
+      "type": "decimal",
+      "default": 0
+    },
+    "creditUsed": {
+      "type": "decimal",
+      "default": 0
+    },
+    "paymentTerms": {
+      "type": "integer",
+      "default": 0
+    },
+    "isActive": {
+      "type": "boolean",
+      "default": true
+    },
+    "isBlocked": {
+      "type": "boolean",
+      "default": false
+    },
+    "notes": {
+      "type": "text"
+    },
+    "identification": {
+      "type": "uid",
+      "required": true
+    },
+    "siigoId": {
+      "type": "uid"
+    },
+    "orders": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order.order",
+      "mappedBy": "customer"
+    },
+    "taxes": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::tax.tax",
+      "mappedBy": "customer"
+    },
+    "prices": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::price.price",
+      "mappedBy": "customer"
+    }
+  }
+}

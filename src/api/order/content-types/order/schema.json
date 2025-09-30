@@ -1,0 +1,217 @@
+{
+  "kind": "collectionType",
+  "collectionName": "orders",
+  "info": {
+    "singularName": "order",
+    "pluralName": "orders",
+    "displayName": "Order"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "code": {
+      "type": "uid",
+      "required": true
+    },
+    "type": {
+      "type": "enumeration",
+      "required": true,
+      "enum": [
+        "in",
+        "out",
+        "purchase",
+        "sale",
+        "transfer",
+        "return",
+        "adjustment",
+        "cut"
+      ]
+    },
+    "state": {
+      "type": "enumeration",
+      "enum": [
+        "draft",
+        "confirmed",
+        "processing",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "containerCode": {
+      "type": "uid"
+    },
+    "priority": {
+      "type": "enumeration",
+      "enum": [
+        "low",
+        "normal",
+        "high",
+        "urgent"
+      ]
+    },
+    "createdDate": {
+      "type": "datetime"
+    },
+    "confirmedDate": {
+      "type": "datetime"
+    },
+    "completedDate": {
+      "type": "datetime"
+    },
+    "cancelledDate": {
+      "type": "datetime"
+    },
+    "estimatedDepositPaymentDate": {
+      "type": "date"
+    },
+    "estimatedDispatchDate": {
+      "type": "date"
+    },
+    "estimatedWarehouseDate": {
+      "type": "date"
+    },
+    "actualDepositPaymentDate": {
+      "type": "date"
+    },
+    "actualDispatchDate": {
+      "type": "date"
+    },
+    "actualWarehouseDate": {
+      "type": "date"
+    },
+    "subtotal": {
+      "type": "decimal",
+      "default": 0
+    },
+    "taxAmount": {
+      "type": "decimal",
+      "required": false,
+      "default": 0
+    },
+    "shippingAmount": {
+      "type": "decimal",
+      "default": 0
+    },
+    "totalAmount": {
+      "type": "decimal",
+      "default": 0
+    },
+    "currency": {
+      "type": "enumeration",
+      "default": "USD",
+      "enum": [
+        "USD",
+        "EUR",
+        "COP"
+      ]
+    },
+    "invoiceNumber": {
+      "type": "uid"
+    },
+    "trackingNumber": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "text"
+    },
+    "sourceWarehouse": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::warehouse.warehouse",
+      "inversedBy": "sourceOrders"
+    },
+    "destinationWarehouse": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::warehouse.warehouse",
+      "inversedBy": "destinationOrders"
+    },
+    "customer": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::customer.customer",
+      "inversedBy": "orders"
+    },
+    "supplier": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::supplier.supplier",
+      "inversedBy": "orders"
+    },
+    "childOrders": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order.order",
+      "mappedBy": "parentOrder"
+    },
+    "parentOrder": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::order.order",
+      "inversedBy": "childOrders"
+    },
+    "generatedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "generatedOrders"
+    },
+    "editedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "editedOrders"
+    },
+    "approvedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::barcode-mapping.barcode-mapping",
+      "inversedBy": "approvedOrders"
+    },
+    "cancelledBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "cancelledOrders"
+    },
+    "orderProducts": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order-product.order-product",
+      "mappedBy": "order"
+    },
+    "movements": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::inventory-movement.inventory-movement",
+      "mappedBy": "order"
+    },
+    "sourceItems": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::item.item",
+      "mappedBy": "sourceOrder"
+    },
+    "attachments": {
+      "type": "media",
+      "multiple": true,
+      "allowedTypes": [
+        "images",
+        "files",
+        "videos",
+        "audios"
+      ]
+    },
+    "siigoId": {
+      "type": "uid"
+    },
+    "items": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::item.item",
+      "mappedBy": "orders"
+    }
+  }
+}

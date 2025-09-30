@@ -1,0 +1,157 @@
+{
+  "kind": "collectionType",
+  "collectionName": "items",
+  "info": {
+    "singularName": "item",
+    "pluralName": "items",
+    "displayName": "Item"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "barcode": {
+      "type": "uid"
+    },
+    "alternativeBarcoe": {
+      "type": "string"
+    },
+    "originalQuantity": {
+      "type": "decimal",
+      "required": true
+    },
+    "currentQuantity": {
+      "type": "decimal",
+      "required": true
+    },
+    "unit": {
+      "type": "enumeration",
+      "required": true,
+      "enum": [
+        "kg",
+        "m",
+        "piece",
+        "unit"
+      ]
+    },
+    "state": {
+      "type": "enumeration",
+      "default": "available",
+      "enum": [
+        "available",
+        "reserved",
+        "sold",
+        "dropped"
+      ]
+    },
+    "lotNumber": {
+      "type": "string"
+    },
+    "receiptDate": {
+      "type": "datetime"
+    },
+    "lastMovementDate": {
+      "type": "datetime"
+    },
+    "isPartition": {
+      "type": "boolean",
+      "default": false
+    },
+    "partitionNumber": {
+      "type": "integer"
+    },
+    "qualityStatus": {
+      "type": "enumeration",
+      "default": "approved",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "conditional"
+      ]
+    },
+    "qualityNotes": {
+      "type": "text"
+    },
+    "itemNumber": {
+      "type": "string"
+    },
+    "qualityCheckDate": {
+      "type": "datetime"
+    },
+    "unitCost": {
+      "type": "decimal"
+    },
+    "product": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::product.product",
+      "inversedBy": "items"
+    },
+    "warehouse": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::warehouse.warehouse",
+      "inversedBy": "items"
+    },
+    "sourceOrder": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::order.order",
+      "inversedBy": "sourceItems"
+    },
+    "orderProducts": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::order-product.order-product",
+      "inversedBy": "items"
+    },
+    "childItems": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::item.item",
+      "mappedBy": "parentItem"
+    },
+    "parentItem": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::item.item",
+      "inversedBy": "childItems"
+    },
+    "qualityCheckedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "qualityCheckedItems"
+    },
+    "lastModifiedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "modifiedItems"
+    },
+    "movements": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::inventory-movement.inventory-movement",
+      "mappedBy": "item"
+    },
+    "orders": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::order.order",
+      "inversedBy": "items"
+    },
+    "barcodeMappings": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::barcode-mapping.barcode-mapping",
+      "mappedBy": "item"
+    }
+  }
+}
