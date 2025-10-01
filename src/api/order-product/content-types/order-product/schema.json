@@ -30,7 +30,7 @@
     "unit": {
       "type": "string"
     },
-    "unitPrice": {
+    "price": {
       "type": "decimal",
       "default": 0
     },

@@ -103,20 +103,23 @@ const UpdateItemSchema = z
   })
   .catchall(z.any());
 
-const CreateOrderProductSchema = z.object({
-  product: ID,
-  order: ID,
-  quantity: z.number().optional().default(null),
-  requestedQuantity: z.number(),
-  requestedPackages: z.number().optional().default(null),
-  confirmedQuantity: z.number().optional().default(null),
-  confirmedPackages: z.number().optional().default(null),
-  deliveredQuantity: z.number().optional().default(null),
-  deliveredPackages: z.number().optional().default(null),
-  unit: UnitEnum.optional().default(null),
-  notes: z.string().optional().default(""),
-  trx: TRX,
-});
+const CreateOrderProductSchema = z
+  .object({
+    product: ID,
+    order: ID,
+    quantity: z.number().optional().default(null),
+    requestedQuantity: z.number(),
+    requestedPackages: z.number().optional().default(null),
+    confirmedQuantity: z.number().optional().default(null),
+    confirmedPackages: z.number().optional().default(null),
+    deliveredQuantity: z.number().optional().default(null),
+    deliveredPackages: z.number().optional().default(null),
+    unit: UnitEnum.optional().default(null),
+    notes: z.string().optional().default(""),
+    price: z.number().optional().default(null),
+    trx: TRX,
+  })
+  .catchall(z.any());
 const UpdateOrderProductSchema = z.object({
   id: ID,
   update: z
@@ -181,6 +184,8 @@ const CreateOrderSchema = z
             )
             .optional()
             .default([]),
+          price: z.number().optional().default(null),
+          name: z.string().optional().default(null),
         })
       )
       .optional()
@@ -191,7 +196,7 @@ const CreateOrderSchema = z
     customer: ID.optional(),
     generatedBy: ID.optional(),
   })
-  .strict();
+  .catchall(z.any());
 const UpdateOrderSchema = z.object({
   id: ID,
   products: z

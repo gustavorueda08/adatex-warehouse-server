@@ -15,13 +15,24 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
     try {
       const orderService = strapi.service(ORDER_SERVICE);
       const data = ctx.request.body;
-      const order = await orderService.create(data);
+      const order = await orderService.create(data.data);
       if (!order) throw new Error("Error al crear la orden");
-      ctx.status = 201;
-      ctx.body = order;
+      console.log(data);
+
+      return {
+        data: order,
+        meta: {},
+      };
     } catch (error) {
-      ctx.status = 500;
-      ctx.body = { error: error.message };
+      console.error("Error al crear orden:", error);
+      return ctx.badRequest(error.message, {
+        error: {
+          status: 500,
+          name: "OrderCreationError",
+          message: error.message,
+          details: error,
+        },
+      });
     }
   },
   // Actualiza una orden, sus orderProducts y items de acuerdo con el tipo de orden
@@ -31,12 +42,27 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       const { orderId } = ctx.params;
       if (!orderId) throw new Error("El id de la orden es requerido");
       const data = ctx.request.body;
-      const order = await orderService.update({ ...data, id: orderId });
-      if (!order) throw new Error("Error al crear la orden");
-      ctx.status = 201;
-      ctx.body = order;
+      const { products = [], ...rest } = data.data;
+      const order = await orderService.update({
+        products,
+        update: { ...rest },
+        id: orderId,
+      });
+      if (!order) throw new Error("Error al actualizar la orden");
+      return {
+        data: order,
+        meta: {},
+      };
     } catch (error) {
-      ctx.badRequest(error.message);
+      console.error("Error al actualizar la orden:", error);
+      return ctx.badRequest(error.message, {
+        error: {
+          status: 500,
+          name: "OrderCreationError",
+          message: error.message,
+          details: error,
+        },
+      });
     }
   },
   // Elimina una orden, sus orderProducts e Items de acuerdo con el tipo de Order
@@ -46,9 +72,22 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       const { orderId } = ctx.params;
       if (!orderId) throw new Error("El id de la orden es requerido");
       const deletedOrder = await orderService.delete({ id: orderId });
-      ctx.body = deletedOrder;
+      console.log(orderId, "ID");
+
+      return {
+        data: deletedOrder,
+        meta: {},
+      };
     } catch (error) {
-      ctx.badRequest(error.message);
+      console.error("Error al crear orden:", error);
+      return ctx.badRequest(error.message, {
+        error: {
+          status: 500,
+          name: "OrderCreationError",
+          message: error.message,
+          details: error,
+        },
+      });
     }
   },
   // Agrega un producto al Order

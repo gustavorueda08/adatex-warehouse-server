@@ -541,6 +541,7 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::barcode-mapping.barcode-mapping'
     >;
+    cbm: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     childItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -598,6 +599,7 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
       'manyToOne',
       'api::warehouse.warehouse'
     >;
+    weight: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<1>;
   };
 }
 
@@ -635,6 +637,7 @@ export interface ApiOrderProductOrderProduct
     name: Schema.Attribute.String;
     notes: Schema.Attribute.Text;
     order: Schema.Attribute.Relation<'manyToOne', 'api::order.order'>;
+    price: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     product: Schema.Attribute.Relation<'manyToOne', 'api::product.product'>;
     publishedAt: Schema.Attribute.DateTime;
     requestedPackages: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
@@ -643,7 +646,6 @@ export interface ApiOrderProductOrderProduct
       Schema.Attribute.DefaultTo<'pending'>;
     subTotal: Schema.Attribute.Decimal;
     unit: Schema.Attribute.String;
-    unitPrice: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -719,7 +721,6 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
       'api::order-product.order-product'
     >;
     parentOrder: Schema.Attribute.Relation<'manyToOne', 'api::order.order'>;
-    priority: Schema.Attribute.Enumeration<['low', 'normal', 'high', 'urgent']>;
     publishedAt: Schema.Attribute.DateTime;
     shippingAmount: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     siigoId: Schema.Attribute.UID;

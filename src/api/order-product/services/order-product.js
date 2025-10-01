@@ -41,6 +41,8 @@ module.exports = createCoreService(
           ...orderProductData
         } = data;
         // Obtención del Producto
+        console.log("PRICE", orderProductData.price);
+
         const product = await strapi.entityService.findOne(
           PRODUCT_SERVICE,
           productId,
@@ -54,6 +56,7 @@ module.exports = createCoreService(
           {},
           data.trx ? { transacting: data.trx } : {}
         );
+
         // Creación y retorno del OrderProduct
         return await strapi.entityService.create(
           ORDER_PRODUCT_SERVICE,
@@ -75,6 +78,7 @@ module.exports = createCoreService(
               order: order.id,
               unit: product.unit,
               name: product.name,
+              price: orderProductData.price,
             },
             populate: ["product", "items", "movements"],
           },

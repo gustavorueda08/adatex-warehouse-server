@@ -152,6 +152,14 @@
       "relation": "oneToMany",
       "target": "api::barcode-mapping.barcode-mapping",
       "mappedBy": "item"
+    },
+    "cbm": {
+      "type": "decimal",
+      "default": 0
+    },
+    "weight": {
+      "type": "decimal",
+      "default": 1
     }
   }
 }

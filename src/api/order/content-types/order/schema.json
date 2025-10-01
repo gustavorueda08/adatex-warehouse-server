@@ -42,15 +42,6 @@
     "containerCode": {
       "type": "uid"
     },
-    "priority": {
-      "type": "enumeration",
-      "enum": [
-        "low",
-        "normal",
-        "high",
-        "urgent"
-      ]
-    },
     "createdDate": {
       "type": "datetime"
     },
