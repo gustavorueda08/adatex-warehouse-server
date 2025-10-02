@@ -43,6 +43,8 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       if (!orderId) throw new Error("El id de la orden es requerido");
       const data = ctx.request.body;
       const { products = [], ...rest } = data.data;
+      console.log(products[0].items);
+
       const order = await orderService.update({
         products,
         update: { ...rest },
