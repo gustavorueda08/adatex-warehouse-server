@@ -394,7 +394,6 @@ export interface ApiBarcodeMappingBarcodeMapping
       'manyToOne',
       'plugin::users-permissions.user'
     >;
-    item: Schema.Attribute.Relation<'manyToOne', 'api::item.item'>;
     itemId: Schema.Attribute.String & Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
@@ -443,23 +442,27 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     creditUsed: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     email: Schema.Attribute.String;
     identification: Schema.Attribute.UID & Schema.Attribute.Required;
+    invoiceOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     isBlocked: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    isDefault: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
       'api::customer.customer'
     > &
       Schema.Attribute.Private;
+    mainParty: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     notes: Schema.Attribute.Text;
     orders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
+    parties: Schema.Attribute.Relation<'oneToMany', 'api::customer.customer'>;
     paymentTerms: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
     phone: Schema.Attribute.String;
     prices: Schema.Attribute.Relation<'oneToMany', 'api::price.price'>;
     publishedAt: Schema.Attribute.DateTime;
     siigoId: Schema.Attribute.UID;
-    taxes: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'>;
+    taxes: Schema.Attribute.Relation<'manyToMany', 'api::tax.tax'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -537,10 +540,6 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
   attributes: {
     alternativeBarcoe: Schema.Attribute.String;
     barcode: Schema.Attribute.UID;
-    barcodeMappings: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::barcode-mapping.barcode-mapping'
-    >;
     cbm: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     childItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
     createdAt: Schema.Attribute.DateTime;
@@ -622,6 +621,8 @@ export interface ApiOrderProductOrderProduct
       Schema.Attribute.Private;
     deliveredPackages: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
     deliveredQuantity: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    invoicePercentage: Schema.Attribute.Decimal &
+      Schema.Attribute.DefaultTo<100>;
     items: Schema.Attribute.Relation<'manyToMany', 'api::item.item'>;
     ivaIncluded: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -691,6 +692,10 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     currency: Schema.Attribute.Enumeration<['USD', 'EUR', 'COP']> &
       Schema.Attribute.DefaultTo<'USD'>;
     customer: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
+    customerForInvoice: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::customer.customer'
+    >;
     destinationWarehouse: Schema.Attribute.Relation<
       'manyToOne',
       'api::warehouse.warehouse'
@@ -771,6 +776,8 @@ export interface ApiPricePrice extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     customer: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
+    invoicePercentage: Schema.Attribute.Decimal &
+      Schema.Attribute.DefaultTo<100>;
     ivaIncluded: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<false>;
@@ -890,7 +897,10 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    customer: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
+    customers: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::customer.customer'
+    >;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::tax.tax'> &
       Schema.Attribute.Private;

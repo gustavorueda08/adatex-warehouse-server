@@ -86,6 +86,10 @@
     "deliveredPackages": {
       "type": "integer",
       "default": 0
+    },
+    "invoicePercentage": {
+      "type": "decimal",
+      "default": 100
     }
   }
 }

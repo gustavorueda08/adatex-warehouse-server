@@ -63,17 +63,39 @@
       "target": "api::order.order",
       "mappedBy": "customer"
     },
-    "taxes": {
-      "type": "relation",
-      "relation": "oneToMany",
-      "target": "api::tax.tax",
-      "mappedBy": "customer"
-    },
     "prices": {
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::price.price",
       "mappedBy": "customer"
+    },
+    "invoiceOrders": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::order.order",
+      "mappedBy": "customerForInvoice"
+    },
+    "mainParty": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::customer.customer",
+      "inversedBy": "parties"
+    },
+    "parties": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::customer.customer",
+      "mappedBy": "mainParty"
+    },
+    "isDefault": {
+      "type": "boolean",
+      "default": false
+    },
+    "taxes": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::tax.tax",
+      "inversedBy": "customers"
     }
   }
 }

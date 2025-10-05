@@ -79,8 +79,7 @@ const UpdateItemSchema = z
   .object({
     id: z.union([ID, z.null()]).optional().default(null),
     barcode: z
-      .union([z.string(), z.number()])
-      .transform(String)
+      .union([z.string(), z.number().transform(String), z.null()])
       .optional()
       .default(null),
     quantity: z.union([z.number(), z.null()]).optional().default(null),

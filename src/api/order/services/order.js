@@ -209,7 +209,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         }
         // Obtener el nuevo estado del Order si llega o tomar el estado del Order actual
         const orderState = update?.state || currentOrder.state;
-        console.log("ESTADO NUEVO", orderState);
 
         // Validamos si viene una lista de productos para comparar con los productos actuales del Order y proceder con la modificación del Order
         if (products.length > 0) {
@@ -271,7 +270,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               parentItem,
               ...item
             } = itemData;
-            console.log(itemData, "ITEMDATA");
 
             // Creación de variable para guardar el Product completo
             let product;
@@ -441,6 +439,8 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "orderProducts.product",
               "sourceWarehouse",
               "destinationWarehouse",
+              "supplier",
+              "customer",
             ],
           },
           { transacting: trx }
@@ -570,7 +570,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           // Para caso Purchase e IN se crea un Item nuevo
           case ORDER_TYPES.PURCHASE:
           case ORDER_TYPES.IN:
-            await itemService.create({
+            return await itemService.create({
               ...item,
               state: ITEM_STATES.AVAILABLE,
               sourceOrder: order.id,
@@ -585,10 +585,10 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               warehouse: destinationWarehouse.id,
               trx,
             });
-            break;
+
           // Para caso Return se actualiza el Item existente a disponible
           case ORDER_TYPES.RETURN:
-            await itemService.update({
+            return await itemService.update({
               ...item,
               state: ITEM_STATES.AVAILABLE,
               order: order.id,
@@ -598,7 +598,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             break;
           // Para caso Sale se actualiza el Item existente a reservado
           case ORDER_TYPES.SALE:
-            await itemService.update({
+            return await itemService.update({
               ...item,
               update: {
                 state: ITEM_STATES.RESERVED,
@@ -608,10 +608,9 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               type: orderType,
               trx,
             });
-            break;
           // Para caso Out se actualiza el Item existente a desechado, quitandolo del warehouse donde esté
           case ORDER_TYPES.OUT:
-            await itemService.update({
+            return await itemService.update({
               ...item,
               state: ITEM_STATES.DROPPED,
               order: order.id,
@@ -619,26 +618,26 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               update: { warehouse: null },
               trx,
             });
-            break;
+
           // Para caso Transfer, se actualiza el Item existente cambiandolo de bodega al destinationWarehouse del Order
           case ORDER_TYPES.TRANSFER:
-            await itemService.update({
+            return await itemService.update({
               ...item,
               warehouse: destinationWarehouse.id,
               order: order.id,
               orderProduct: orderProduct.id,
               trx,
             });
-            break;
+
           // Para caso Adjustment (normalmente cantidades), se actualiza el Item existente cambiando lo que venga en Item
           case ORDER_TYPES.ADJUSTMENT:
-            await itemService.update({
+            return await itemService.update({
               ...item,
               order: order.id,
               orderProduct: orderProduct.id,
               trx,
             });
-            break;
+
           // Para caso Cut, se crea un nuevo Item que toma como padre el Item inicial y se actualiza la cantidad actual del Item padre
           case ORDER_TYPES.CUT:
             await itemService.create({
@@ -649,7 +648,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               parentItem: parentItem.id,
               trx,
             });
-            await itemService.update({
+            return await itemService.update({
               id: item.parentItem,
               currentQuantity: Math.max(
                 parentItem.currentQuantity - item.quantity,
@@ -657,7 +656,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               ),
               trx,
             });
-            break;
+
           default:
             break;
         }
@@ -669,17 +668,16 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           // Para caso Purchase e IN, se elimina el Item de la base de datos
           case ORDER_TYPES.PURCHASE:
           case ORDER_TYPES.IN:
-            await itemService.delete({
+            return await itemService.delete({
               id: item.id,
               order: order.id,
               orderProduct: orderProduct.id,
               trx,
             });
-            break;
           // Para caso Sale y Out, se actualiza el Item a disponible
           case ORDER_TYPES.SALE:
           case ORDER_TYPES.OUT:
-            await itemService.update({
+            return await itemService.update({
               id: item.id,
               reverse: true,
               update: {
@@ -690,37 +688,37 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               type: order.type,
               trx,
             });
-            break;
+
           // Para el caso de Return, se actualiza el Item a vendido, ya que si es una devolución, su ultimo estado debió ser este, además de eliminarlo de la bodega
           case ORDER_TYPES.RETURN:
-            await itemService.update({
+            return await itemService.update({
               id: item.id,
               reverse: true,
               update: { state: ITEM_STATES.SOLD, warehouse: null },
               trx,
             });
-            break;
+
           // Para el caso de Transfer, se actualiza el Item cambiandolo a la bodega de origen del Order, ya que su estado anterior debió ser la bodega destino del Order
           case ORDER_TYPES.TRANSFER:
-            await itemService.update({
+            return await itemService.update({
               id: item.id,
               reverse: true,
               udpade: { warehouse: sourceWarehouse.id },
               trx,
             });
-            break;
+
           // Para el caso de Adjustment, se actualiza el Item cambiando el currentQuantity al estado anterior que tenía, tomándolo del último movimiento que tuvo
           case ORDER_TYPES.ADJUSTMENT:
             const lastMovement = movements.at(-1);
             if (!lastMovement)
               throw new Error("No hay movimientos de este Item");
-            await itemService.update({
+            return await itemService.update({
               id: item.id,
               reverse: true,
               currentQuantity: lastMovement.balanceBefore,
               trx,
             });
-            break;
+
           // Para el caso de Cut, se elimina el Item y se actualiza el Item padre aumentando su cantidad con la cantidad del Item parcial
           case ORDER_TYPES.CUT:
             await itemService.delete({
@@ -729,7 +727,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               orderProduct: orderProduct.id,
               trx,
             });
-            await itemService.update({
+            return await itemService.update({
               id: parentItem.id,
               reverse: true,
               currentQuantity:
@@ -737,7 +735,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                 (item.currentQuantity || item.quantity),
               trx,
             });
-            break;
           default:
             break;
         }
@@ -756,13 +753,13 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             if (item.warehouse) {
               pruchaseUpdate.warehouse = item.warehouse.id;
             }
-            await itemService.update({
+            return await itemService.update({
               id: item.id,
               update: pruchaseUpdate,
               type: orderType,
               trx,
             });
-            break;
+
           // Para caso Sale, si el Order está completado entonces el estado pasa a vendido, si está cancelado entonces cambia a disponible, y para cualquier otro pasa a reservado
           case ORDER_TYPES.SALE:
             let itemState = ITEM_STATES.RESERVED;
@@ -780,13 +777,14 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             if (warehouse) {
               update.warehouse = warehouse.id;
             }
-            await itemService.update({
+            console.log("UPDATE", update, warehouse);
+
+            return await itemService.update({
               id: item.id,
               update,
               type: orderType,
               trx,
             });
-            break;
           default:
             break;
         }
@@ -835,7 +833,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           if (!orderProduct) throw new Error("Error al crear el OrderProduct");
         }
         // Realizar movimiento de agregación Item de acuerdo al tipo del Order
-        await strapi.service(ORDER_SERVICE).doItemMovement({
+        const addedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
           movementType: ITEM_MOVEMENT_TYPES.CREATE,
           item,
           order: currentOrder,
@@ -846,7 +844,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         });
         strapi.io
           ?.to(`order:${currentOrder.id}`)
-          .emit("order:item-added", item);
+          .emit("order:item-added", { ...addedItem, product });
         // Actualizar el OrderProduct
         await orderProductService.update({
           id: orderProduct.id,
@@ -916,7 +914,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         if (!orderProduct)
           throw new Error("El OrderProduct no pudo ser encontrado");
         // Remoción del Item
-        await strapi.service(ORDER_SERVICE).doItemMovement({
+        const removedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
           movementType: ITEM_MOVEMENT_TYPES.DELETE,
           item,
           order: currentOrder,
@@ -925,9 +923,14 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           orderState: currentOrder.state,
           trx,
         });
-        strapi.io
-          ?.to(`order:${currentOrder.id}`)
-          .emit("order:item-removed", item);
+        if (!removedItem) {
+          console.log("PAILANGAS");
+        }
+        strapi.io?.to(`order:${currentOrder.id}`).emit("order:item-removed", {
+          ...removedItem,
+          product: orderProduct.product,
+        });
+
         // Actualizar OrderProduct
         await orderProductService.update({
           id: orderProduct.id,

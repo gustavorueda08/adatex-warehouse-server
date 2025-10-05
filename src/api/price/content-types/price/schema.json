@@ -37,6 +37,11 @@
       "relation": "manyToOne",
       "target": "api::customer.customer",
       "inversedBy": "prices"
+    },
+    "invoicePercentage": {
+      "type": "decimal",
+      "required": false,
+      "default": 100
     }
   }
 }

@@ -17,8 +17,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       const data = ctx.request.body;
       const order = await orderService.create(data.data);
       if (!order) throw new Error("Error al crear la orden");
-      console.log(data);
-
       return {
         data: order,
         meta: {},
@@ -43,7 +41,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       if (!orderId) throw new Error("El id de la orden es requerido");
       const data = ctx.request.body;
       const { products = [], ...rest } = data.data;
-      console.log(products[0].items);
 
       const order = await orderService.update({
         products,
@@ -57,6 +54,8 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       };
     } catch (error) {
       console.error("Error al actualizar la orden:", error);
+      console.error(error.message);
+
       return ctx.badRequest(error.message, {
         error: {
           status: 500,
@@ -74,7 +73,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       const { orderId } = ctx.params;
       if (!orderId) throw new Error("El id de la orden es requerido");
       const deletedOrder = await orderService.delete({ id: orderId });
-      console.log(orderId, "ID");
 
       return {
         data: deletedOrder,
@@ -97,14 +95,23 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
     try {
       const orderService = strapi.service(ORDER_SERVICE);
       const { orderId } = ctx.params;
-      const data = ctx.request.body;
-      console.log({ ...data, id: orderId });
+      const data = ctx.request.body.data;
 
       if (!orderId) throw new Error("El id de la orden es requerido");
       const updatedOrder = await orderService.addItem({ ...data, id: orderId });
-      ctx.body = updatedOrder;
+      return {
+        data: updatedOrder,
+        meta: {},
+      };
     } catch (error) {
-      ctx.badRequest(error.message);
+      return ctx.badRequest(error, {
+        error: {
+          status: 500,
+          name: "ItemAddError",
+          message: error.message,
+          details: error,
+        },
+      });
     }
   },
   // Remuebe un producto del Order
@@ -112,15 +119,26 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
     try {
       const orderService = strapi.service(ORDER_SERVICE);
       const { orderId } = ctx.params;
-      const data = ctx.request.body;
+      const data = ctx.request.body.data;
+
       if (!orderId) throw new Error("El id de la orden es requerido");
       const updatedOrder = await orderService.removeItem({
         ...data,
         id: orderId,
       });
-      ctx.body = updatedOrder;
+      return {
+        data: updatedOrder,
+        meta: {},
+      };
     } catch (error) {
-      ctx.badRequest(error.message);
+      return ctx.badRequest(error, {
+        error: {
+          status: 500,
+          name: "ItemRemoveError",
+          message: error.message,
+          details: error,
+        },
+      });
     }
   },
 }));

@@ -41,7 +41,6 @@ module.exports = createCoreService(
           ...orderProductData
         } = data;
         // Obtención del Producto
-        console.log("PRICE", orderProductData.price);
 
         const product = await strapi.entityService.findOne(
           PRODUCT_SERVICE,
@@ -94,8 +93,6 @@ module.exports = createCoreService(
         // Obtención de variables
         const { id, orderState } = data;
         const { items, ...dataToUpdate } = data.update;
-        console.log("ITEMSSSSSSS", items);
-
         // Obtención del OrderProduct a modificar
         const currentOrderProduct = await strapi.entityService.findOne(
           ORDER_PRODUCT_SERVICE,
@@ -128,7 +125,6 @@ module.exports = createCoreService(
               deliveredPackages: 0,
             }
           );
-          console.log("QUANTITIES", quantities);
         } else if (items.length > 0) {
           // Si vienen los Items y no están vacíos, entonces modificamos las cantidades del OrderProduct con estos
           quantities = items.reduce(

@@ -147,12 +147,6 @@
       "target": "api::order.order",
       "inversedBy": "items"
     },
-    "barcodeMappings": {
-      "type": "relation",
-      "relation": "oneToMany",
-      "target": "api::barcode-mapping.barcode-mapping",
-      "mappedBy": "item"
-    },
     "cbm": {
       "type": "decimal",
       "default": 0

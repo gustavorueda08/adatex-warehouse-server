@@ -38,12 +38,6 @@
     "siigoCode": {
       "type": "uid"
     },
-    "customer": {
-      "type": "relation",
-      "relation": "manyToOne",
-      "target": "api::customer.customer",
-      "inversedBy": "taxes"
-    },
     "tresholdContidion": {
       "type": "enumeration",
       "enum": [
@@ -56,6 +50,12 @@
     "treshold": {
       "type": "decimal",
       "default": 0
+    },
+    "customers": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::customer.customer",
+      "mappedBy": "taxes"
     }
   }
 }

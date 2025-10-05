@@ -200,7 +200,6 @@ module.exports = ({ strapi }) => ({
           },
           { transacting: trx }
         );
-        console.log(outOrderProducts);
 
         if (!outOrderProducts)
           throw new Error("Error al obtener los productos de ventas");
@@ -221,7 +220,6 @@ module.exports = ({ strapi }) => ({
           },
           {}
         );
-        console.log(groupedOutOrderProducts);
 
         // Creación de Helper para filtrar items por estado y bodega
         const filterHelper = (items = [], state, warehouseType) => {

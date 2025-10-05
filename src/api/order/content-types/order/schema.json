@@ -203,6 +203,12 @@
       "relation": "manyToMany",
       "target": "api::item.item",
       "mappedBy": "orders"
+    },
+    "customerForInvoice": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::customer.customer",
+      "inversedBy": "invoiceOrders"
     }
   }
 }

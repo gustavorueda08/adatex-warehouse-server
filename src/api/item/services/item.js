@@ -1,6 +1,9 @@
 "use strict";
 
-const { generateItemBarcode } = require("../../../utils/generateCodes");
+const {
+  generateItemBarcode,
+  setItemBarcode,
+} = require("../../../utils/generateCodes");
 const {
   IN,
   ADJUSTMENT,
@@ -36,7 +39,6 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
   create: withValidation(CreateItemSchema, async (data) => {
     try {
       //Creación del Item
-      console.log(data, "CREATE");
 
       const newItem = await strapi.entityService.create(
         ITEM_SERVICE,
@@ -149,6 +151,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       }
       // Obtención del Item actual, tenemos tres maneras de buscarlo, por su id, por su barcode o por su cantidad (si llega el id del Product)
       let currentItem;
+
       // Obtención del Item por su ID
       if (data.id) {
         // Busqueda del Item por su id
@@ -218,8 +221,8 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       } else if (data.quantity && data.product) {
         // Busqueda del Item por su cantidad (Scan manual)
         // Obtención del Warehouse en dónde buscar el Item
-        let sourceWarehouse;
-        if (!data.sourceWarehouse) {
+        let warehouse;
+        if (!data.warehouse) {
           const warehouses = await strapi.entityService.findMany(
             WAREHOUSE_SERVICE,
             {
@@ -230,58 +233,66 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
             data.trx ? { transacting: data.trx } : {}
           );
           if (warehouses.length > 0) {
-            sourceWarehouse = warehouses[0];
+            warehouse = warehouses[0];
           }
         } else {
-          sourceWarehouse = await strapi.entityService.findOne(
+          warehouse = await strapi.entityService.findOne(
             WAREHOUSE_SERVICE,
-            data.sourceWarehouse,
+            data.warehouse,
             {},
             data.trx ? { transacting: data.trx } : {}
           );
         }
-        if (!sourceWarehouse)
+        if (!warehouse)
           throw new Error(
             "No se ha encontrado una bodega de origen para buscar el Item"
           );
-
         // Busqueda de Items con cantidad y product especifico en el warehouse encontrado
         const items = await strapi.entityService.findMany(
           ITEM_SERVICE,
           {
             filters: {
               product: data.product,
-              currentQuantity: data.quantity,
-              state: data.justAvailableItems && ITEM_STATES.AVAILABLE,
-              warehouse: sourceWarehouse.id,
+              currentQuantity: Number(data.quantity),
+              warehouse: warehouse.id,
+              ...(data.justAvailableItems && { state: ITEM_STATES.AVAILABLE }),
             },
-            populate: ["movements", "orderProducts", "orderProducts.order"],
+            populate: [
+              "movements",
+              "orderProducts",
+              "orderProducts.order",
+              "product",
+              "warehouse",
+            ],
           },
           data.trx ? { transacting: data.trx } : {}
         );
         // Obtención del Item y creación del VirtualBarcode
         if (items.length > 0) {
           currentItem = items[0];
+          const vCode = setItemBarcode({
+            productCode: currentItem.product.barcode,
+            itemNumber: currentItem.itemNumber,
+            lotNumber: currentItem.lotNumber,
+            containerCode: null,
+            isVirtual: true,
+          });
           //Creación del VirtualBarcode asociado al Item encontrado
-          await strapi.entityService.create(
+          const virtualbarcode = await strapi.entityService.create(
             BARCODE_MAPPING_SERVICE,
             {
-              itemId: currentItem.id,
-              item: currentItem.id,
-              virtualBarcode: generateItemBarcode(
-                currentItem.product,
-                currentItem.currentQuantity,
-                currentItem.lot,
-                currentItem.itemNumber,
-                null,
-                true
-              ),
-              realBarcode: currentItem.barcode,
-              type: "manual",
+              data: {
+                itemId: String(currentItem.id),
+                virtualBarcode: vCode,
+                realBarcode: currentItem.barcode,
+                type: "manual",
+              },
             },
             data.trx ? { transacting: data.trx } : {}
           );
+          console.log(virtualbarcode);
         }
+        console.log("VIRTUAL BARCODE CREADO");
       } else {
         throw new Error("Se requieren los datos para identificar el Item");
       }
@@ -298,6 +309,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         },
         data.trx ? { transacting: data.trx } : {}
       );
+
       // Creación de los InventoryMovements de acuerdo con el orderType y los cambios presenciados
       const changes = [];
       // InventoryMovement de ajuste por cambios en el currentQuantity
@@ -314,8 +326,9 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         });
       }
       // InventoryMovement de transferencia por cambios en el warehouse
-      if (currentItem.warehouse?.id !== updatedItem.warehouse?.id) {
+      if (currentItem.warehouse?.id != updatedItem.warehouse?.id) {
         console.log("INGRESO A CAMBIO DE WAREHOUSE");
+        console.log(currentItem.warehouse?.id, updatedItem.warehouse?.id);
 
         changes.push({
           type: TRANSFER,
@@ -331,7 +344,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         });
       }
       // Identificación de cambios de estado de acuerdo al tipo de orden que hace un cambio de estado
-      if (currentItem.state !== updatedItem.state) {
+      if (currentItem.state != updatedItem.state) {
         const stateMovement = {
           item: updatedItem.id,
           quantity: updatedItem.currentQuantity,
