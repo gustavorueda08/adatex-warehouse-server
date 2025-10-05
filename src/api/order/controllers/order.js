@@ -54,8 +54,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       };
     } catch (error) {
       console.error("Error al actualizar la orden:", error);
-      console.error(error.message);
-
       return ctx.badRequest(error.message, {
         error: {
           status: 500,
