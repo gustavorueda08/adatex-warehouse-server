@@ -16,6 +16,7 @@ const {
   InventoryByProductSchema,
 } = require("../../../validation/schemas");
 const { withValidation } = require("../../../validation/withValidation");
+const logger = require("../../../utils/logger");
 
 module.exports = ({ strapi }) => ({
   inventoryByWarehouse: withValidation(
@@ -344,24 +345,30 @@ module.exports = ({ strapi }) => ({
         }
 
         // 2. Obtener bodegas
-        const warehouses = await warehouseService.findMany({
-          filters: warehouseFilters,
-          populate: ["items", "items.product"],
-          trx,
-        });
-
-        const orderProducts = await orderProductService.findMany({
-          filters: {
-            state: "pending",
+        const warehouses = await strapi.entityService.findMany(
+          WAREHOUSE_SERVICE,
+          {
+            filters: warehouseFilters,
+            populate: ["items", "items.product"],
           },
-          populate: [
-            "product",
-            "order",
-            "order.sourceWarehouse",
-            "order.destinationWarehouse",
-          ],
-          trx,
-        });
+          { transacting: trx }
+        );
+
+        const orderProducts = await strapi.entityService.findMany(
+          ORDER_PRODUCT_SERVICE,
+          {
+            filters: {
+              state: "pending",
+            },
+            populate: [
+              "product",
+              "order",
+              "order.sourceWarehouse",
+              "order.destinationWarehouse",
+            ],
+          },
+          { transacting: trx }
+        );
 
         const inventoryBywarehouse = [];
         warehouses.forEach(({ items = [], ...warehouseData }) => {
@@ -370,6 +377,11 @@ module.exports = ({ strapi }) => ({
             (orderProduct) =>
               orderProduct.order?.destinationWarehouse?.id === warehouseData.id
           );
+          // Filtrar orderProducts de salida para este warehouse
+          const outOrderProducts = orderProducts.filter(
+            (op) => op.order?.sourceWarehouse?.id === warehouseData.id
+          );
+
           const itemsGroupedByProduct = Object.values(
             items.reduce((acc, item) => {
               const productId = item.product.id;
@@ -402,26 +414,29 @@ module.exports = ({ strapi }) => ({
                 item.state === ITEM_STATES.RESERVED ? item.currentQuantity : 0;
               acc[productId].summary.totalReservedItems +=
                 item.state === ITEM_STATES.RESERVED ? 1 : 0;
-
-              const saleOrderProduct = orderProducts.find(
-                (op) =>
-                  op.product.id === productId &&
-                  op.order.sourceWarehouse?.id === warehouseData.id
-              );
-              if (saleOrderProduct) {
-                acc[productId].summary.totalOutRequestedQuantity += Math.max(
-                  saleOrderProduct.requestedQuantity -
-                    saleOrderProduct.confirmedQuantity,
-                  0
-                );
-                acc[productId].summary.totalOutRequestedItems += Math.max(
-                  saleOrderProduct.requestedPackages -
-                    saleOrderProduct.confirmedPackages
-                );
-              }
               return acc;
             }, {})
           );
+
+          // Agregar cantidades solicitadas de salida
+          outOrderProducts.forEach((saleOrderProduct) => {
+            const productId = saleOrderProduct.product.id;
+            const productData = itemsGroupedByProduct.find(
+              (p) => p.id === productId
+            );
+            if (productData) {
+              productData.summary.totalOutRequestedQuantity += Math.max(
+                saleOrderProduct.requestedQuantity -
+                  saleOrderProduct.confirmedQuantity,
+                0
+              );
+              productData.summary.totalOutRequestedItems += Math.max(
+                saleOrderProduct.requestedPackages -
+                  saleOrderProduct.confirmedPackages,
+                0
+              );
+            }
+          });
           const inOrderProductsByProduct = Object.values(
             inOrderProducts.reduce((acc, orderProduct) => {
               const productId = orderProduct.product.id;
@@ -449,18 +464,14 @@ module.exports = ({ strapi }) => ({
               (p) => p.id === product.id
             );
             if (productFromItemsGroup) {
-              productFromItemsGroup.summary.totalOutRequestedQuantity +=
-                product.summary.totalOutRequestedQuantity;
-              productFromItemsGroup.summary.totalOutRequestedItems +=
-                product.summary.totalOutRequestedItems;
+              productFromItemsGroup.summary.totalInRequestedQuantity +=
+                product.summary.totalInRequestedQuantity;
+              productFromItemsGroup.summary.totalInRequestedItems +=
+                product.summary.totalInRequestedItems;
             } else {
               itemsGroupedByProduct.push(product);
             }
           });
-          console.log(
-            "PRODUCTOS TIPO IN PARA INSERTAR",
-            inOrderProductsByProduct
-          );
 
           const productsHaveSameUnit =
             itemsGroupedByProduct.length > 0 &&
@@ -513,7 +524,7 @@ module.exports = ({ strapi }) => ({
         return inventoryBywarehouse;
       });
     } catch (error) {
-      console.error("Error getting inventory by warehouse:", error);
+      logger.error("Error getting inventory by warehouse:", error);
       throw error;
     }
   },
@@ -553,7 +564,7 @@ module.exports = ({ strapi }) => ({
               in: [],
               out: [],
               transfer: [],
-              adjust: [],
+              adjustment: [],
               summary: {
                 totalIn: 0,
                 totalOut: 0,
@@ -563,74 +574,76 @@ module.exports = ({ strapi }) => ({
                 totalItems: 0,
               },
             };
-            const {
-              type,
-              quantity,
-              balanceAfter,
-              balanceBefore,
-              createdAt,
-              destinationWarehouse,
-              sourceWarehouse,
-              reason,
-            } = invMovement;
-            switch (type) {
-              case "in":
-                acc[productId].in.push({
-                  quantity,
-                  balanceAfter,
-                  balanceBefore,
-                  type,
-                  destinationWarehouse,
-                  reason,
-                  date: createdAt,
-                });
-                acc[productId].summary.totalIn += quantity;
-                acc[productId].summary.totalQuantity += quantity;
-                break;
-              case "out":
-                acc[productId].out.push({
-                  quantity,
-                  balanceAfter,
-                  balanceBefore,
-                  type,
-                  sourceWarehouse,
-                  reason,
-                  date: createdAt,
-                });
-                acc[productId].summary.totalOut += quantity;
-                acc[productId].summary.totalQuantity -= quantity;
-                break;
-              case "transfer":
-                acc[productId].transfer.push({
-                  quantity,
-                  balanceAfter,
-                  balanceBefore,
-                  type,
-                  destinationWarehouse,
-                  sourceWarehouse,
-                  reason,
-                  date: createdAt,
-                });
-                acc[productId].summary.totalTransfer += quantity;
-                acc[productId].summary.totalQuantity += quantity;
-                break;
-              case "adjustment":
-                acc[productId].adjustment.push({
-                  quantity,
-                  balanceAfter,
-                  balanceBefore,
-                  type,
-                  destinationWarehouse,
-                  sourceWarehouse,
-                  reason,
-                  date: createdAt,
-                });
-                acc[productId].summary.totalAdjust += quantity;
-                acc[productId].summary.totalQuantity += quantity;
-                break;
-              default:
-                break;
-            }
+          }
+
+          const {
+            type,
+            quantity,
+            balanceAfter,
+            balanceBefore,
+            createdAt,
+            destinationWarehouse,
+            sourceWarehouse,
+            reason,
+          } = invMovement;
+
+          switch (type) {
+            case "in":
+              acc[productId].in.push({
+                quantity,
+                balanceAfter,
+                balanceBefore,
+                type,
+                destinationWarehouse,
+                reason,
+                date: createdAt,
+              });
+              acc[productId].summary.totalIn += quantity;
+              acc[productId].summary.totalQuantity += quantity;
+              break;
+            case "out":
+              acc[productId].out.push({
+                quantity,
+                balanceAfter,
+                balanceBefore,
+                type,
+                sourceWarehouse,
+                reason,
+                date: createdAt,
+              });
+              acc[productId].summary.totalOut += quantity;
+              acc[productId].summary.totalQuantity -= quantity;
+              break;
+            case "transfer":
+              acc[productId].transfer.push({
+                quantity,
+                balanceAfter,
+                balanceBefore,
+                type,
+                destinationWarehouse,
+                sourceWarehouse,
+                reason,
+                date: createdAt,
+              });
+              acc[productId].summary.totalTransfer += quantity;
+              // Los transfers no afectan la cantidad total del producto
+              break;
+            case "adjustment":
+              acc[productId].adjustment.push({
+                quantity,
+                balanceAfter,
+                balanceBefore,
+                type,
+                destinationWarehouse,
+                sourceWarehouse,
+                reason,
+                date: createdAt,
+              });
+              acc[productId].summary.totalAdjust += quantity;
+              acc[productId].summary.totalQuantity += quantity;
+              break;
+            default:
+              break;
           }
           return acc;
         }, {})
@@ -656,7 +669,7 @@ module.exports = ({ strapi }) => ({
       const { warehouseId, productId, customerId } = filters;
 
       const itemFilters = {
-        status: "reserved",
+        state: "reserved",
         currentQuantity: { $gt: 0 },
       };
 
@@ -685,7 +698,7 @@ module.exports = ({ strapi }) => ({
           for (const orderProduct of item.orderProducts) {
             if (
               orderProduct.order &&
-              orderProduct.order.status !== "cancelled"
+              orderProduct.order.state !== "cancelled"
             ) {
               // Filtrar por cliente si se especifica
               if (
@@ -717,7 +730,7 @@ module.exports = ({ strapi }) => ({
                   id: orderProduct.order.id,
                   orderNumber: orderProduct.order.orderNumber,
                   type: orderProduct.order.type,
-                  status: orderProduct.order.status,
+                  state: orderProduct.order.state,
                   createdDate: orderProduct.order.createdDate,
                 },
                 customer: orderProduct.order.customer
@@ -745,7 +758,7 @@ module.exports = ({ strapi }) => ({
         },
       };
     } catch (error) {
-      console.error("Error getting active reservations:", error);
+      logger.error("Error getting active reservations:", error);
       throw error;
     }
   },
@@ -818,7 +831,7 @@ module.exports = ({ strapi }) => ({
         const quantity = parseFloat(item.currentQuantity);
         availability.totalQuantity += quantity;
 
-        switch (item.status) {
+        switch (item.state) {
           case "available":
             availability.availableQuantity += quantity;
             availability.byWarehouse[warehouseKey].available += quantity;
@@ -856,7 +869,7 @@ module.exports = ({ strapi }) => ({
           id: item.id,
           barcode: item.barcode,
           quantity: item.currentQuantity,
-          status: item.status,
+          state: item.state,
         });
 
         // Verificar items próximos a vencer
@@ -883,7 +896,7 @@ module.exports = ({ strapi }) => ({
 
       return availability;
     } catch (error) {
-      console.error("Error getting product availability:", error);
+      logger.error("Error getting product availability:", error);
       throw error;
     }
   },

@@ -8,7 +8,9 @@ const ITEM_MOVEMENT_TYPES = require("../utils/itemMovementTypes");
 // Reusables
 const UnitEnum = z.enum(["kg", "m", "roll", "unit"]);
 const OrderType = z.enum(Object.values(ORDER_TYPES));
-const OrderState = z.enum(Object.values(ORDER_STATES));
+const OrderState = z
+  .union([z.null(), z.enum(Object.values(ORDER_STATES))])
+  .default(null);
 const ItemState = z.enum(Object.values(ITEM_STATES));
 const ItemMovementType = z.enum(Object.values(ITEM_MOVEMENT_TYPES));
 const ID = z.union([z.string(), z.number()]).transform(Number);
@@ -39,6 +41,10 @@ const Item = z.object({
     .optional()
     .default(null),
   warehouse: z.union([ID, z.null()]).optional().default(null),
+  // Campos para transformaciones
+  sourceItemId: z.union([ID, z.null()]).optional().default(null),
+  sourceQuantityConsumed: z.union([z.number(), z.null()]).optional().default(null),
+  targetQuantity: z.union([z.number(), z.null()]).optional().default(null),
 });
 
 // Schema para creación de Item
@@ -255,7 +261,7 @@ const DoItemMovementSchema = z.object({
     })
     .catchall(z.any())
     .optional(),
-  product: z.object({}).catchall(z.any()),
+  product: z.union([z.object({}).catchall(z.any()), z.null()]).default(null),
   orderProduct: z.object({}).catchall(z.any()),
   orderState: OrderState,
   reverse: z.boolean().optional().default(false),

@@ -4,9 +4,10 @@ const ORDER_TYPES = {
   TRANSFER: "transfer",
   RETURN: "return",
   ADJUSTMENT: "adjustment",
-  CUT: "cut",
+  TRANSFORM: "transform",
   OUT: "out",
   IN: "in",
+  PARTIAL_INVOICE: "partial-invoice",
 };
 
 module.exports = ORDER_TYPES;

@@ -8,6 +8,7 @@ const services = {
   INVENTORY_MOVEMENT_SERVICE: "api::inventory-movement.inventory-movement",
   ACCOUNTING_SERVICE: "api::accounting.accounting",
   PRODUCT_SERVICE: "api::product.product",
+  CUSTOMER_SERVICE: "api::customer.customer",
 };
 
 module.exports = services;

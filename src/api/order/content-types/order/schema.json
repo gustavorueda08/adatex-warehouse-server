@@ -26,8 +26,12 @@
         "transfer",
         "return",
         "adjustment",
-        "cut"
+        "transform",
+        "partial-invoice"
       ]
+    },
+    "transformationFactor": {
+      "type": "decimal"
     },
     "state": {
       "type": "enumeration",
@@ -209,6 +213,12 @@
       "relation": "manyToOne",
       "target": "api::customer.customer",
       "inversedBy": "invoiceOrders"
+    },
+    "createdBarcodes": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::barcode-mapping.barcode-mapping",
+      "mappedBy": "createdFromOrder"
     }
   }
 }

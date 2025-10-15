@@ -32,7 +32,8 @@
       "default": "subtotal",
       "enum": [
         "product",
-        "subtotal"
+        "subtotal",
+        "auto"
       ]
     },
     "siigoCode": {
@@ -56,6 +57,14 @@
       "relation": "manyToMany",
       "target": "api::customer.customer",
       "mappedBy": "taxes"
+    },
+    "use": {
+      "type": "enumeration",
+      "default": "decrement",
+      "enum": [
+        "increment",
+        "decrement"
+      ]
     }
   }
 }

@@ -286,6 +286,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
                 virtualBarcode: vCode,
                 realBarcode: currentItem.barcode,
                 type: "manual",
+                createdFromOrder: order,
               },
             },
             data.trx ? { transacting: data.trx } : {}
@@ -297,6 +298,30 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         throw new Error("Se requieren los datos para identificar el Item");
       }
       if (!currentItem) throw new Error("No se encontró ningun Item");
+
+      // Si es una reversión, eliminar barcode-mappings creados desde esta orden
+      if (reverse && order) {
+        const barcodeMappingsToDelete = await strapi.entityService.findMany(
+          BARCODE_MAPPING_SERVICE,
+          {
+            filters: {
+              itemId: String(currentItem.id),
+              createdFromOrder: order,
+            },
+          },
+          data.trx ? { transacting: data.trx } : {}
+        );
+
+        // Eliminar cada barcode-mapping encontrado
+        for (const mapping of barcodeMappingsToDelete) {
+          await strapi.entityService.delete(
+            BARCODE_MAPPING_SERVICE,
+            mapping.id,
+            data.trx ? { transacting: data.trx } : {}
+          );
+        }
+      }
+
       // Actualización del Item
       const updatedItem = await strapi.entityService.update(
         ITEM_SERVICE,
@@ -415,6 +440,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           data.trx ? { transacting: data.trx } : {}
         )
       );
+      //
       // Retorno del Item actualizado con sus movimientos
       return { ...updatedItem, movements };
     } catch (error) {

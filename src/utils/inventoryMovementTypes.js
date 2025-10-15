@@ -6,6 +6,7 @@ const inventoryMovementTypes = {
   ADJUSTMENT: "adjustment",
   RESERVE: "reserve",
   UNRESERVE: "unreserve",
+  TRANSFORM: "transform",
 };
 
 module.exports = inventoryMovementTypes;

@@ -45,14 +45,12 @@ module.exports = createCoreService(
         const product = await strapi.entityService.findOne(
           PRODUCT_SERVICE,
           productId,
-          {},
           data.trx ? { transacting: data.trx } : {}
         );
         // Obtención de la Orden
         const order = await strapi.entityService.findOne(
           ORDER_SERVICE,
           orderId,
-          {},
           data.trx ? { transacting: data.trx } : {}
         );
 
@@ -80,8 +78,8 @@ module.exports = createCoreService(
               price: orderProductData.price,
             },
             populate: ["product", "items", "movements"],
-          },
-          data.trx ? { transacting: data.trx } : {}
+            ...(data.trx ? { transacting: data.trx } : {})
+          }
         );
       } catch (error) {
         throw error;
@@ -99,8 +97,8 @@ module.exports = createCoreService(
           id,
           {
             populate: ["items"],
-          },
-          data.trx ? { transacting: data.trx } : {}
+            ...(data.trx ? { transacting: data.trx } : {})
+          }
         );
         // Cantidades a modificar
         let quantities = {};
@@ -155,8 +153,8 @@ module.exports = createCoreService(
               ...quantities,
             },
             populate: data.populate,
-          },
-          data.trx ? { transacting: data.trx } : {}
+            ...(data.trx ? { transacting: data.trx } : {})
+          }
         );
       } catch (error) {
         throw error;

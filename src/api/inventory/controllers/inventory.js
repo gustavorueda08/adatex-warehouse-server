@@ -1,141 +1,216 @@
 const moment = require("moment-timezone");
 const { INVENTORY_SERVICE } = require("../../../utils/services");
+const logger = require("../../../utils/logger");
 
 module.exports = {
-  async byWarehouse(ctx) {
+  /**
+   * GET /api/inventory?type=<operation>
+   *
+   * Available operations:
+   * - by-warehouse: Get inventory by warehouse (params: warehouseId, productId, warehouses[], isActive)
+   * - by-product: Get inventory by product (params: productId, warehouseId)
+   * - summary: Get inventory summary
+   * - reservations: Get active reservations (params: warehouseId, productId, customerId)
+   * - availability: Get product availability (params: productId, warehouseId)
+   * - movements: Get inventory movements (params: startDate, endDate, byProduct)
+   */
+  async get(ctx) {
     try {
+      // Safely extract type from query params
+      console.log(ctx.query);
+
+      const type = ctx.query?.filters?.type?.["$eq"] || ctx.query?.filters.type;
+      console.log(type);
+
       const inventoryService = strapi.service(INVENTORY_SERVICE);
-      const { warehouses = [], isActive = true } = ctx.request.body;
-      const inventory = await inventoryService.inventoryByWarehouse({
-        warehouses,
-        isActive,
-      });
-      ctx.body = inventory;
-    } catch (error) {
-      ctx.badRequest(error.message);
-    }
-  },
-  async byProduct(ctx) {
-    try {
-      const inventoryService = strapi.service(INVENTORY_SERVICE);
-      const data = ctx.request.body;
-      const inventory = await inventoryService.inventoryByProduct(data);
-      ctx.body = inventory;
-    } catch (error) {
-      ctx.badRequest(error.message);
-    }
-  },
-  async getByWarehouse(ctx) {
-    try {
-      const { warehouseId, productId } = ctx.query;
-      const filters = {
-        warehouseId: warehouseId ? parseInt(warehouseId) : null,
-        productId: productId ? parseInt(productId) : null,
-      };
-      const inventory = await strapi
-        .service(INVENTORY_SERVICE)
-        .getInventoryByWarehouse(filters);
-      ctx.body = inventory;
-    } catch (error) {
-      ctx.badRequest(error.message);
-    }
-  },
-  async getMovements(ctx) {
-    try {
-      const date = moment.tz.setDefault("America/Bogota");
-      const { startDate = null, endDate = null, byProduct = false } = ctx.query;
-      let filters = {};
-      if (startDate && endDate) {
-        filters = {
-          $and: [
-            { createdAt: { $lte: endDate } },
-            { createdAt: { $gte: startDate } },
-          ],
-        };
+
+      if (!type) {
+        return ctx.badRequest("Parameter 'type' is required", {
+          error: {
+            status: 400,
+            name: "ValidationError",
+            message: "Parameter 'type' is required",
+          },
+        });
       }
-      const movements = byProduct
-        ? await strapi
-            .service(INVENTORY_SERVICE)
-            .getMovementsByProduct({ filters })
-        : await strapi.service(INVENTORY_SERVICE).getMovements({ filters });
-      ctx.status = 200;
-      ctx.body = movements;
-    } catch (error) {
-      ctx.badRequest(error.message);
-    }
-  },
-  /**
-   * GET /api/inventory/summary
-   */
-  async getSummary(ctx) {
-    try {
-      const summary = await strapi
-        .service("api::inventory.inventory")
-        .getInventorySummary();
 
-      ctx.body = {
-        data: summary,
-        meta: {
-          timestamp: new Date().toISOString(),
+      switch (type) {
+        case "by-warehouse":
+          return await this.handleByWarehouse(ctx, inventoryService);
+
+        case "by-product":
+          return await this.handleByProduct(ctx, inventoryService);
+
+        case "summary":
+          return await this.handleSummary(ctx, inventoryService);
+
+        case "reservations":
+          return await this.handleReservations(ctx, inventoryService);
+
+        case "availability":
+          return await this.handleAvailability(ctx, inventoryService);
+
+        case "movements":
+          return await this.handleMovements(ctx, inventoryService);
+
+        default:
+          return ctx.badRequest(`Invalid type: ${type}`, {
+            error: {
+              status: 400,
+              name: "ValidationError",
+              message: `Invalid type: ${type}. Valid types are: by-warehouse, by-product, summary, reservations, availability, movements`,
+            },
+          });
+      }
+    } catch (error) {
+      logger.error("Error in inventory controller:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "InventoryError",
+          message:
+            error.message ||
+            "An error occurred while processing inventory request",
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
-      };
-    } catch (error) {
-      ctx.badRequest(error.message);
+      });
     }
   },
 
-  /**
-   * GET /api/inventory/reservations
-   */
-  async getReservations(ctx) {
-    try {
-      const { warehouseId, productId, customerId } = ctx.query;
+  async handleByWarehouse(ctx, inventoryService) {
+    const { warehouseId, productId, warehouses, isActive = "true" } = ctx.query;
 
+    let inventory;
+
+    // Si se proporciona warehouses (array), usar el método original
+    if (warehouses) {
+      const warehouseArray = Array.isArray(warehouses)
+        ? warehouses
+        : [warehouses];
+      inventory = await inventoryService.inventoryByWarehouse({
+        warehouses: warehouseArray,
+        isActive: isActive === "true",
+      });
+    } else {
+      // Si se proporcionan IDs específicos, usar el método getInventoryByWarehouse
       const filters = {
         warehouseId: warehouseId ? parseInt(warehouseId) : null,
         productId: productId ? parseInt(productId) : null,
-        customerId: customerId ? parseInt(customerId) : null,
       };
-
-      const reservations = await strapi
-        .service("api::inventory.inventory")
-        .getActiveReservations(filters);
-
-      ctx.body = {
-        data: reservations,
-        meta: {
-          timestamp: new Date().toISOString(),
-          filters,
-        },
-      };
-    } catch (error) {
-      ctx.badRequest(error.message);
+      inventory = await inventoryService.getInventoryByWarehouse(filters);
     }
+
+    return {
+      data: inventory,
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    };
   },
 
-  /**
-   * GET /api/inventory/product/:id/availability
-   */
-  async getProductAvailability(ctx) {
-    try {
-      const { id } = ctx.params;
-      const { warehouseId } = ctx.query;
+  async handleByProduct(ctx, inventoryService) {
+    const { productId, warehouseId } = ctx.query.filters;
+    const data = {
+      productId: productId ? parseInt(productId) : null,
+      warehouseId: warehouseId ? parseInt(warehouseId) : null,
+    };
+    const inventory = await inventoryService.inventoryByProduct(data);
 
-      const availability = await strapi
-        .service("api::inventory.inventory")
-        .getProductAvailability(
-          parseInt(id),
-          warehouseId ? parseInt(warehouseId) : null
-        );
+    return {
+      data: inventory,
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    };
+  },
 
-      ctx.body = {
-        data: availability,
-        meta: {
-          timestamp: new Date().toISOString(),
-        },
-      };
-    } catch (error) {
-      ctx.badRequest(error.message);
+  async handleSummary(ctx, inventoryService) {
+    const summary = await inventoryService.getInventorySummary();
+
+    return {
+      data: summary,
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    };
+  },
+
+  async handleReservations(ctx, inventoryService) {
+    const { warehouseId, productId, customerId } = ctx.query;
+    const filters = {
+      warehouseId: warehouseId ? parseInt(warehouseId) : null,
+      productId: productId ? parseInt(productId) : null,
+      customerId: customerId ? parseInt(customerId) : null,
+    };
+    const reservations = await inventoryService.getActiveReservations(filters);
+
+    return {
+      data: reservations,
+      meta: {
+        timestamp: new Date().toISOString(),
+        filters,
+      },
+    };
+  },
+
+  async handleAvailability(ctx, inventoryService) {
+    const { productId, warehouseId } = ctx.query;
+
+    if (!productId) {
+      return ctx.badRequest(
+        "Parameter 'productId' is required for availability type",
+        {
+          error: {
+            status: 400,
+            name: "ValidationError",
+            message: "Parameter 'productId' is required for availability type",
+          },
+        }
+      );
     }
+
+    const availability = await inventoryService.getProductAvailability(
+      parseInt(productId),
+      warehouseId ? parseInt(warehouseId) : null
+    );
+
+    return {
+      data: availability,
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    };
+  },
+
+  async handleMovements(ctx, inventoryService) {
+    moment.tz.setDefault("America/Bogota");
+    const { startDate = null, endDate = null, byProduct = "false" } = ctx.query;
+
+    let filters = {};
+    if (startDate && endDate) {
+      filters = {
+        $and: [
+          { createdAt: { $lte: endDate } },
+          { createdAt: { $gte: startDate } },
+        ],
+      };
+    }
+
+    const movements =
+      byProduct === "true"
+        ? await inventoryService.getMovementsByProduct({ filters })
+        : await inventoryService.getMovements({ filters });
+
+    return {
+      data: movements,
+      meta: {
+        timestamp: new Date().toISOString(),
+        filters: {
+          startDate,
+          endDate,
+          byProduct: byProduct === "true",
+        },
+      },
+    };
   },
 };

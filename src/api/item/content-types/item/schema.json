@@ -123,6 +123,18 @@
       "target": "api::item.item",
       "inversedBy": "childItems"
     },
+    "transformedFromItem": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::item.item",
+      "inversedBy": "transformedItems"
+    },
+    "transformedItems": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::item.item",
+      "mappedBy": "transformedFromItem"
+    },
     "qualityCheckedBy": {
       "type": "relation",
       "relation": "manyToOne",
@@ -154,6 +166,13 @@
     "weight": {
       "type": "decimal",
       "default": 1
+    },
+    "isInvoiced": {
+      "type": "boolean",
+      "default": false
+    },
+    "invoicedDate": {
+      "type": "datetime"
     }
   }
 }

@@ -389,6 +389,10 @@ export interface ApiBarcodeMappingBarcodeMapping
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    createdFromOrder: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::order.order'
+    >;
     expiresAt: Schema.Attribute.DateTime;
     generatedBy: Schema.Attribute.Relation<
       'manyToOne',
@@ -546,6 +550,8 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     currentQuantity: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    invoicedDate: Schema.Attribute.DateTime;
+    isInvoiced: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     isPartition: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     itemNumber: Schema.Attribute.String;
     lastModifiedBy: Schema.Attribute.Relation<
@@ -588,6 +594,11 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
       ['available', 'reserved', 'sold', 'dropped']
     > &
       Schema.Attribute.DefaultTo<'available'>;
+    transformedFromItem: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::item.item'
+    >;
+    transformedItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
     unit: Schema.Attribute.Enumeration<['kg', 'm', 'piece', 'unit']> &
       Schema.Attribute.Required;
     unitCost: Schema.Attribute.Decimal;
@@ -686,6 +697,10 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     confirmedDate: Schema.Attribute.DateTime;
     containerCode: Schema.Attribute.UID;
     createdAt: Schema.Attribute.DateTime;
+    createdBarcodes: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::barcode-mapping.barcode-mapping'
+    >;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     createdDate: Schema.Attribute.DateTime;
@@ -742,6 +757,7 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     taxAmount: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     totalAmount: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     trackingNumber: Schema.Attribute.String;
+    transformationFactor: Schema.Attribute.Decimal;
     type: Schema.Attribute.Enumeration<
       [
         'in',
@@ -751,7 +767,8 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
         'transfer',
         'return',
         'adjustment',
-        'cut',
+        'transform',
+        'partial-invoice',
       ]
     > &
       Schema.Attribute.Required;
@@ -892,7 +909,9 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
   };
   attributes: {
     amount: Schema.Attribute.Decimal & Schema.Attribute.Required;
-    applicationType: Schema.Attribute.Enumeration<['product', 'subtotal']> &
+    applicationType: Schema.Attribute.Enumeration<
+      ['product', 'subtotal', 'auto']
+    > &
       Schema.Attribute.DefaultTo<'subtotal'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -916,6 +935,8 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    use: Schema.Attribute.Enumeration<['increment', 'decrement']> &
+      Schema.Attribute.DefaultTo<'decrement'>;
   };
 }
 

@@ -2,8 +2,8 @@ module.exports = {
   routes: [
     {
       method: "GET",
-      path: "/inventory",
-      handler: "inventory.get",
+      path: "/dashboard/stats",
+      handler: "dashboard.getStats",
       config: {
         policies: [],
         middlewares: [],

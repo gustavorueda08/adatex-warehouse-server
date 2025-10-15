@@ -25,5 +25,15 @@ module.exports = {
       method: "POST",
       handler: "order.remove",
     },
+    {
+      path: "/orders/:parentOrderId/invoiceable-items",
+      method: "GET",
+      handler: "order.getInvoiceableItems",
+    },
+    {
+      path: "/orders/create-partial-invoice",
+      method: "POST",
+      handler: "order.createPartialInvoice",
+    },
   ],
 };
