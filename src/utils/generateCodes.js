@@ -17,7 +17,11 @@ function generateItemBarcode(
       );
     if (!quantity) throw new Error("Se requiere la cantidad");
     if (!lot) throw new Error("Se requiere el lote");
-    return `${isVirtual ? "VIRTUAL-" : ""}${product.barcode}-${quantity * 100}-${lot}-${itemNumber ? itemNumber : Date.now()}${containerCode ? `-${containerCode}` : ""}`;
+
+    // Convertir el containerCode si existe
+    const convertedCode = containerCode ? convertCode(containerCode) : "";
+
+    return `${isVirtual ? "VIRTUAL-" : ""}${product.barcode}${quantity * 100}${lot}${itemNumber ? itemNumber : Date.now()}${convertedCode ? `${convertedCode}` : ""}`;
   } catch (error) {
     throw error;
   }
@@ -38,7 +42,22 @@ function setItemBarcode({
   return `${productCode}${itemNumber}${lotNumber}${containerCode ? convertCode(containerCode) : ""}`;
 }
 
+function generateAlternativeItemBarcode(code, quantity, containerCode) {
+  try {
+    if (!code) throw new Error("Se requiere el código del producto");
+    if (quantity === null || quantity === undefined) throw new Error("Se requiere la cantidad");
+
+    // Convertir el containerCode si existe, de lo contrario usar string vacío
+    const convertedCode = containerCode ? convertCode(containerCode) : "";
+
+    return `${code}-${quantity}${convertedCode ? `-${convertedCode}` : ""}`;
+  } catch (error) {
+    throw error;
+  }
+}
+
 module.exports = {
   generateItemBarcode,
   setItemBarcode,
+  generateAlternativeItemBarcode,
 };

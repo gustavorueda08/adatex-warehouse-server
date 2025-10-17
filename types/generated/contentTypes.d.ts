@@ -542,7 +542,7 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    alternativeBarcoe: Schema.Attribute.String;
+    alternativeBarcode: Schema.Attribute.String;
     barcode: Schema.Attribute.UID;
     cbm: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     childItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;

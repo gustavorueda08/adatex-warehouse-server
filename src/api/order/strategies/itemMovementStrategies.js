@@ -32,7 +32,15 @@ class ItemMovementStrategy {
  * Estrategia para órdenes de compra e ingreso
  */
 class PurchaseInStrategy extends ItemMovementStrategy {
-  async create({ item, order, orderProduct, product, trx, parentItem, orderType }) {
+  async create({
+    item,
+    order,
+    orderProduct,
+    product,
+    trx,
+    parentItem,
+    orderType,
+  }) {
     return await this.itemService.create({
       ...item,
       state: ITEM_STATES.AVAILABLE,
@@ -46,6 +54,7 @@ class PurchaseInStrategy extends ItemMovementStrategy {
         barcode: product.barcode,
       },
       warehouse: order.destinationWarehouse.id,
+      containerCode: order.containerCode,
       trx,
     });
   }
@@ -68,7 +77,15 @@ class PurchaseInStrategy extends ItemMovementStrategy {
     });
   }
 
-  async delete({ item, order, orderProduct, orderType, parentItem, movements, trx }) {
+  async delete({
+    item,
+    order,
+    orderProduct,
+    orderType,
+    parentItem,
+    movements,
+    trx,
+  }) {
     return await this.itemService.delete({
       id: item.id,
       order: order.id,
@@ -82,7 +99,15 @@ class PurchaseInStrategy extends ItemMovementStrategy {
  * Estrategia para órdenes de venta
  */
 class SaleStrategy extends ItemMovementStrategy {
-  async create({ item, order, orderProduct, trx, orderType, parentItem, product }) {
+  async create({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    product,
+  }) {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
@@ -105,7 +130,9 @@ class SaleStrategy extends ItemMovementStrategy {
       updatePayload.product = product.id;
       updatePayload.warehouse = item.warehouse || order.sourceWarehouse?.id;
     } else {
-      throw new Error("Se requiere id, barcode o quantity+product para buscar el item");
+      throw new Error(
+        "Se requiere id, barcode o quantity+product para buscar el item"
+      );
     }
 
     return await this.itemService.update(updatePayload);
@@ -139,7 +166,15 @@ class SaleStrategy extends ItemMovementStrategy {
     });
   }
 
-  async delete({ item, order, orderProduct, trx, orderType, parentItem, movements }) {
+  async delete({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    movements,
+  }) {
     return await this.itemService.update({
       id: item.id,
       reverse: true,
@@ -158,7 +193,15 @@ class SaleStrategy extends ItemMovementStrategy {
  * Estrategia para órdenes de devolución
  */
 class ReturnStrategy extends ItemMovementStrategy {
-  async create({ item, order, orderProduct, trx, orderType, parentItem, product }) {
+  async create({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    product,
+  }) {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
@@ -180,7 +223,9 @@ class ReturnStrategy extends ItemMovementStrategy {
       updatePayload.product = product.id;
       updatePayload.warehouse = item.warehouse;
     } else {
-      throw new Error("Se requiere id, barcode o quantity+product para buscar el item");
+      throw new Error(
+        "Se requiere id, barcode o quantity+product para buscar el item"
+      );
     }
 
     return await this.itemService.update(updatePayload);
@@ -199,13 +244,21 @@ class ReturnStrategy extends ItemMovementStrategy {
     });
   }
 
-  async delete({ item, trx, order, orderProduct, orderType, parentItem, movements }) {
+  async delete({
+    item,
+    trx,
+    order,
+    orderProduct,
+    orderType,
+    parentItem,
+    movements,
+  }) {
     return await this.itemService.update({
       id: item.id,
       reverse: true,
       update: {
         state: ITEM_STATES.SOLD,
-        warehouse: null
+        warehouse: null,
       },
       type: orderType,
       trx,
@@ -217,7 +270,15 @@ class ReturnStrategy extends ItemMovementStrategy {
  * Estrategia para órdenes de salida (OUT)
  */
 class OutStrategy extends ItemMovementStrategy {
-  async create({ item, order, orderProduct, trx, orderType, parentItem, product }) {
+  async create({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    product,
+  }) {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
@@ -241,7 +302,9 @@ class OutStrategy extends ItemMovementStrategy {
       updatePayload.product = product.id;
       updatePayload.warehouse = item.warehouse || order.sourceWarehouse?.id;
     } else {
-      throw new Error("Se requiere id, barcode o quantity+product para buscar el item");
+      throw new Error(
+        "Se requiere id, barcode o quantity+product para buscar el item"
+      );
     }
 
     return await this.itemService.update(updatePayload);
@@ -261,7 +324,15 @@ class OutStrategy extends ItemMovementStrategy {
     });
   }
 
-  async delete({ item, order, orderProduct, trx, orderType, parentItem, movements }) {
+  async delete({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    movements,
+  }) {
     return await this.itemService.update({
       id: item.id,
       reverse: true,
@@ -280,7 +351,15 @@ class OutStrategy extends ItemMovementStrategy {
  * Estrategia para órdenes de transferencia
  */
 class TransferStrategy extends ItemMovementStrategy {
-  async create({ item, order, orderProduct, trx, orderType, parentItem, product }) {
+  async create({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    product,
+  }) {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
@@ -303,7 +382,9 @@ class TransferStrategy extends ItemMovementStrategy {
       updatePayload.product = product.id;
       updatePayload.warehouse = item.warehouse || order.sourceWarehouse?.id;
     } else {
-      throw new Error("Se requiere id, barcode o quantity+product para buscar el item");
+      throw new Error(
+        "Se requiere id, barcode o quantity+product para buscar el item"
+      );
     }
 
     return await this.itemService.update(updatePayload);
@@ -322,7 +403,15 @@ class TransferStrategy extends ItemMovementStrategy {
     });
   }
 
-  async delete({ item, order, trx, orderProduct, orderType, parentItem, movements }) {
+  async delete({
+    item,
+    order,
+    trx,
+    orderProduct,
+    orderType,
+    parentItem,
+    movements,
+  }) {
     return await this.itemService.update({
       id: item.id,
       reverse: true,
@@ -337,7 +426,15 @@ class TransferStrategy extends ItemMovementStrategy {
  * Estrategia para órdenes de ajuste
  */
 class AdjustmentStrategy extends ItemMovementStrategy {
-  async create({ item, order, orderProduct, trx, orderType, parentItem, product }) {
+  async create({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    product,
+  }) {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
@@ -356,9 +453,12 @@ class AdjustmentStrategy extends ItemMovementStrategy {
     } else if (item.quantity && product) {
       updatePayload.quantity = item.quantity;
       updatePayload.product = product.id;
-      updatePayload.warehouse = item.warehouse || order.destinationWarehouse?.id;
+      updatePayload.warehouse =
+        item.warehouse || order.destinationWarehouse?.id;
     } else {
-      throw new Error("Se requiere id, barcode o quantity+product para buscar el item");
+      throw new Error(
+        "Se requiere id, barcode o quantity+product para buscar el item"
+      );
     }
 
     // Si hay cambio de cantidad en el update payload del item
@@ -381,7 +481,15 @@ class AdjustmentStrategy extends ItemMovementStrategy {
     });
   }
 
-  async delete({ item, movements, trx, order, orderProduct, orderType, parentItem }) {
+  async delete({
+    item,
+    movements,
+    trx,
+    order,
+    orderProduct,
+    orderType,
+    parentItem,
+  }) {
     const lastMovement = movements?.at(-1);
     if (!lastMovement) {
       throw new Error("No hay movimientos de este Item");
@@ -410,7 +518,10 @@ class TransformStrategy extends ItemMovementStrategy {
       OUT,
       TRANSFORM,
     } = require("../../../utils/inventoryMovementTypes");
-    const { ITEM_SERVICE, INVENTORY_MOVEMENT_SERVICE } = require("../../../utils/services");
+    const {
+      ITEM_SERVICE,
+      INVENTORY_MOVEMENT_SERVICE,
+    } = require("../../../utils/services");
 
     // Obtener el item origen (sourceItem)
     let sourceItem;
@@ -425,7 +536,9 @@ class TransformStrategy extends ItemMovementStrategy {
       );
 
       if (!sourceItem) {
-        throw new Error(`Item origen con id ${item.sourceItemId} no encontrado`);
+        throw new Error(
+          `Item origen con id ${item.sourceItemId} no encontrado`
+        );
       }
     } else {
       throw new Error("Se requiere sourceItemId para transformaciones");
@@ -465,7 +578,10 @@ class TransformStrategy extends ItemMovementStrategy {
       originalQuantity: targetQuantity,
       currentQuantity: targetQuantity,
       unit: product.unit,
-      warehouse: item.warehouse || sourceItem.warehouse?.id || order.destinationWarehouse?.id,
+      warehouse:
+        item.warehouse ||
+        sourceItem.warehouse?.id ||
+        order.destinationWarehouse?.id,
       sourceOrder: order.id,
       orderProduct: orderProduct.id,
       product: product.id,
@@ -551,19 +667,26 @@ class TransformStrategy extends ItemMovementStrategy {
     });
   }
 
-  async delete({ item, order, orderProduct, trx, orderType, parentItem, movements }) {
+  async delete({
+    item,
+    order,
+    orderProduct,
+    trx,
+    orderType,
+    parentItem,
+    movements,
+  }) {
     const { TRANSFORM } = require("../../../utils/inventoryMovementTypes");
-    const { ITEM_SERVICE, INVENTORY_MOVEMENT_SERVICE } = require("../../../utils/services");
+    const {
+      ITEM_SERVICE,
+      INVENTORY_MOVEMENT_SERVICE,
+    } = require("../../../utils/services");
 
     // Obtener el item con sus relaciones para determinar si es corte o transformación
-    const fullItem = await strapi.entityService.findOne(
-      ITEM_SERVICE,
-      item.id,
-      {
-        populate: ["parentItem", "transformedFromItem", "product"],
-        transacting: trx,
-      }
-    );
+    const fullItem = await strapi.entityService.findOne(ITEM_SERVICE, item.id, {
+      populate: ["parentItem", "transformedFromItem", "product"],
+      transacting: trx,
+    });
 
     if (!fullItem) {
       throw new Error(`Item con id ${item.id} no encontrado`);
@@ -573,11 +696,14 @@ class TransformStrategy extends ItemMovementStrategy {
     const sourceItem = fullItem.parentItem || fullItem.transformedFromItem;
 
     if (!sourceItem) {
-      throw new Error("No se encontró el item origen para revertir la transformación");
+      throw new Error(
+        "No se encontró el item origen para revertir la transformación"
+      );
     }
 
     const isCut = !!fullItem.parentItem;
-    const quantityToRestore = fullItem.currentQuantity || fullItem.originalQuantity;
+    const quantityToRestore =
+      fullItem.currentQuantity || fullItem.originalQuantity;
 
     // 1. Restaurar la cantidad al item origen
     const restoredQuantity = sourceItem.currentQuantity + quantityToRestore;
@@ -693,9 +819,7 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
     // Si se proporciona producto + cantidad, buscar items automáticamente
     else if (item.quantity && product) {
       if (!order.customer?.id && !order.parentOrder?.customer?.id) {
-        throw new Error(
-          "Se requiere customer para buscar items por cantidad"
-        );
+        throw new Error("Se requiere customer para buscar items por cantidad");
       }
 
       const customerId = order.customer?.id || order.parentOrder?.customer?.id;

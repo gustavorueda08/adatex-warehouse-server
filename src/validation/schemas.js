@@ -261,7 +261,7 @@ const DoItemMovementSchema = z.object({
         ])
         .optional()
         .default(null),
-      containerCode: z.union([ID, z.null()]).optional().default(null),
+      containerCode: z.union([z.string(), z.null()]).optional().default(null),
     })
     .catchall(z.any())
     .optional(),

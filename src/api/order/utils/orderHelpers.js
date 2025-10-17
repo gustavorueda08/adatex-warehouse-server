@@ -144,7 +144,6 @@ const updateOrderProducts = async (
   products,
   orderState,
   orderProductService,
-  warehouse,
   trx
 ) => {
   // Obtener todos los Items actuales y requeridos
@@ -252,10 +251,12 @@ const updateOrderProducts = async (
 
     const { product, ...itemData } = item;
 
-    // Obtener bodega de destino si viene
-    let destinationWarehouse = null;
+    // Determinar el warehouse a usar
+    let warehouseToUse = null;
+
     if (newItemData.warehouse) {
-      destinationWarehouse = await strapi.entityService.findOne(
+      // Si viene warehouse en la request, validar que existe
+      const destinationWarehouse = await strapi.entityService.findOne(
         WAREHOUSE_SERVICE,
         newItemData.warehouse,
         { transacting: trx }
@@ -264,13 +265,21 @@ const updateOrderProducts = async (
       if (!destinationWarehouse) {
         throw new Error("La bodega de destino no existe");
       }
+
+      warehouseToUse = destinationWarehouse;
+    } else if (currentOrder.destinationWarehouse) {
+      // Si no viene warehouse, usar el destinationWarehouse del order
+      warehouseToUse = currentOrder.destinationWarehouse;
+    } else {
+      // Fallback al warehouse actual del item
+      warehouseToUse = itemData.warehouse;
     }
 
     await strapi.service(ORDER_SERVICE).doItemMovement({
       movementType: ITEM_MOVEMENT_TYPES.UPDATE,
       item: {
         ...itemData,
-        warehouse: destinationWarehouse || itemData.warehouse,
+        warehouse: warehouseToUse,
         currentQuantity:
           newItemData.quantity ||
           newItemData.currentQuantity ||
@@ -288,6 +297,7 @@ const updateOrderProducts = async (
 
 /**
  * Actualiza OrderProducts existentes sin cambios de items
+ * Asegura que los items reciban el destinationWarehouse del order
  */
 const updateExistingOrderProducts = async (
   strapi,
@@ -295,23 +305,30 @@ const updateExistingOrderProducts = async (
   orderState,
   trx
 ) => {
-  const { orderProducts } = currentOrder;
+  const { orderProducts, destinationWarehouse } = currentOrder;
 
   for (const orderProduct of orderProducts) {
     if (orderProduct.items.length > 0) {
       const { items, product, ...orderProductData } = orderProduct;
 
-      await runInBatches(items, (item) =>
-        strapi.service(ORDER_SERVICE).doItemMovement({
+      await runInBatches(items, (item) => {
+        // Preparar el item con el warehouse correcto
+        const itemWithWarehouse = {
+          ...item,
+          // Si el order tiene destinationWarehouse, usarlo para el item
+          ...(destinationWarehouse && { warehouse: destinationWarehouse }),
+        };
+
+        return strapi.service(ORDER_SERVICE).doItemMovement({
           movementType: ITEM_MOVEMENT_TYPES.UPDATE,
-          item,
+          item: itemWithWarehouse,
           order: currentOrder,
           orderState,
           product,
           orderProduct: orderProductData,
           trx,
-        })
-      );
+        });
+      });
     }
   }
 };
