@@ -152,7 +152,14 @@ const updateOrderProducts = async (
     .flat();
 
   const itemsFromRequest = products
-    .map(({ product, items }) => items.map((item) => ({ ...item, product })))
+    .map(({ product, items, ivaIncluded, price }) =>
+      items.map((item) => ({
+        ...item,
+        product,
+        ivaIncluded,
+        price,
+      }))
+    )
     .flat();
 
   // Clasificar items
@@ -285,6 +292,8 @@ const updateOrderProducts = async (
           newItemData.currentQuantity ||
           itemData.currentQuantity ||
           itemData.quantity,
+        price: newItemData.price || itemData.price || 0,
+        ivaIncluded: newItemData.ivaIncluded || itemData.ivaIncluded || false,
       },
       order: currentOrder,
       orderState,
@@ -360,20 +369,20 @@ const recalculateOrderProducts = async (
   await runInBatches(orderProducts, async (orderProduct) => {
     const { product } = orderProduct;
     const dataFromRequest = products.find((p) => p.product === product.id);
-
-    const update = {};
-
-    if (dataFromRequest?.requestedQuantity) {
-      const { requestedQuantity } = dataFromRequest;
-      update.requestedQuantity = requestedQuantity;
-      update.requestedPackages = Math.round(
-        requestedQuantity / product.unitsPerPackage
+    const {
+      items,
+      orderProduct: _,
+      product: p,
+      ...updateData
+    } = dataFromRequest;
+    if (updateData.requestedQuantity) {
+      updateData.requestedPackages = Math.round(
+        updateData.requestedQuantity / product.unitsPerPackage
       );
     }
-
     await orderProductService.update({
       id: orderProduct.id,
-      update,
+      update: updateData,
       orderState,
       trx,
     });

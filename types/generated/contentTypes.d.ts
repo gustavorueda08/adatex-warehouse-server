@@ -546,6 +546,7 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
     barcode: Schema.Attribute.UID;
     cbm: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     childItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
+    cost: Schema.Attribute.Decimal;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -601,7 +602,6 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
     transformedItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
     unit: Schema.Attribute.Enumeration<['kg', 'm', 'piece', 'unit']> &
       Schema.Attribute.Required;
-    unitCost: Schema.Attribute.Decimal;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

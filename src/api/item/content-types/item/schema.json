@@ -84,7 +84,7 @@
     "qualityCheckDate": {
       "type": "datetime"
     },
-    "unitCost": {
+    "cost": {
       "type": "decimal"
     },
     "product": {

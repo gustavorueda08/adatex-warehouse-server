@@ -221,6 +221,8 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         }
 
         // Actualizar OrderProducts con cantidades finales
+        console.log("PRODUCTS", products);
+
         await recalculateOrderProducts(
           strapi,
           currentOrder.id,
@@ -370,6 +372,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             item,
             order,
             orderProduct,
+            product,
             orderState,
             orderType,
             trx,

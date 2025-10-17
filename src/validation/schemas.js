@@ -15,64 +15,69 @@ const ItemState = z.enum(Object.values(ITEM_STATES));
 const ItemMovementType = z.enum(Object.values(ITEM_MOVEMENT_TYPES));
 const ID = z.union([z.string(), z.number()]).transform(Number);
 const TRX = z.any().optional().default(null);
-const Item = z.object({
-  id: z.union([ID, z.null()]).optional().default(null),
-  barcode: z
-    .union([z.union([z.string(), z.number()]).transform(String), z.null()])
-    .optional()
-    .default(null),
-  product: z.union([ID, z.null()]).optional().default(null),
-  sourceWarehouse: z.union([ID, z.null()]).optional().default(null),
-  quantity: z.union([z.number(), z.null()]).optional().default(null),
-  lot: z
-    .union([z.union([z.number(), z.string()]).transform(String), z.null()])
-    .optional()
-    .default(null),
-  itemNumber: z
-    .union([z.union([z.number(), z.string()]).transform(String), z.null()])
-    .optional()
-    .default(null),
-  containerCode: z
-    .union([z.union([z.number(), z.string()]).transform(String), z.null()])
-    .optional()
-    .default(null),
-  parentItem: z
-    .union([z.object({ id: ID }), z.null()])
-    .optional()
-    .default(null),
-  warehouse: z.union([ID, z.null()]).optional().default(null),
-  // Campos para transformaciones
-  sourceItemId: z.union([ID, z.null()]).optional().default(null),
-  sourceQuantityConsumed: z
-    .union([z.number(), z.null()])
-    .optional()
-    .default(null),
-  targetQuantity: z.union([z.number(), z.null()]).optional().default(null),
-});
+const Item = z
+  .object({
+    id: z.union([ID, z.null()]).optional().default(null),
+    barcode: z
+      .union([z.union([z.string(), z.number()]).transform(String), z.null()])
+      .optional()
+      .default(null),
+    product: z.union([ID, z.null()]).optional().default(null),
+    sourceWarehouse: z.union([ID, z.null()]).optional().default(null),
+    quantity: z.union([z.number(), z.null()]).optional().default(null),
+    lot: z
+      .union([z.union([z.number(), z.string()]).transform(String), z.null()])
+      .optional()
+      .default(null),
+    itemNumber: z
+      .union([z.union([z.number(), z.string()]).transform(String), z.null()])
+      .optional()
+      .default(null),
+    containerCode: z
+      .union([z.union([z.number(), z.string()]).transform(String), z.null()])
+      .optional()
+      .default(null),
+    parentItem: z
+      .union([z.object({ id: ID }), z.null()])
+      .optional()
+      .default(null),
+    warehouse: z.union([ID, z.null()]).optional().default(null),
+    // Campos para transformaciones
+    sourceItemId: z.union([ID, z.null()]).optional().default(null),
+    sourceQuantityConsumed: z
+      .union([z.number(), z.null()])
+      .optional()
+      .default(null),
+    targetQuantity: z.union([z.number(), z.null()]).optional().default(null),
+  })
+  .catchall(z.any());
 
 // Schema para creación de Item
-const CreateItemSchema = z.object({
-  quantity: z.number().positive(),
-  product: z.object({
-    id: ID,
-    unit: UnitEnum,
-    barcode: z.string(),
-    name: z.string(),
-    code: z.string(),
-  }),
-  state: ItemState,
-  sourceOrder: ID,
-  containerCode: z
-    .union([z.string(), z.number(), z.null()])
-    .transform(String)
-    .optional()
-    .default(null),
-  orderProduct: ID,
-  lot: z.union([z.string(), z.number()]).transform(String),
-  itemNumber: z.union([z.string(), z.number()]).transform(String),
-  warehouse: ID,
-  trx: TRX,
-});
+const CreateItemSchema = z
+  .object({
+    quantity: z.number().positive(),
+    product: z.object({
+      id: ID,
+      unit: UnitEnum,
+      barcode: z.string(),
+      name: z.string(),
+      code: z.string(),
+    }),
+    state: ItemState,
+    sourceOrder: ID,
+    containerCode: z
+      .union([z.string(), z.number(), z.null()])
+      .transform(String)
+      .optional()
+      .default(null),
+    orderProduct: ID,
+    lot: z.union([z.string(), z.number()]).transform(String),
+    itemNumber: z.union([z.string(), z.number()]).transform(String),
+    warehouse: ID,
+    cost: z.union([z.number(), z.null()]).optional().default(0),
+    trx: TRX,
+  })
+  .catchall(z.any());
 
 // Schema para borrado de Item
 const DeleteItemSchema = z
@@ -108,6 +113,7 @@ const UpdateItemSchema = z
     trx: TRX,
     sourceWarehouse: z.union([ID, z.null()]).optional().default(null),
     orderState: OrderState.optional().default(null),
+    cost: z.union([z.number(), z.null()]).optional().default(0),
   })
   .catchall(z.any());
 
@@ -209,12 +215,14 @@ const UpdateOrderSchema = z.object({
   id: ID,
   products: z
     .array(
-      z.object({
-        orderProduct: ID.optional().default(null),
-        product: ID,
-        items: z.array(Item).optional().default([]),
-        requestedQuantity: z.number().optional().default(null),
-      })
+      z
+        .object({
+          orderProduct: ID.optional().default(null),
+          product: ID,
+          items: z.array(Item).optional().default([]),
+          requestedQuantity: z.number().optional().default(null),
+        })
+        .catchall(z.any())
     )
     .optional()
     .default([]),
@@ -232,44 +240,46 @@ const InventoryByProductSchema = z.object({
   products: z.array(ID).optional().default([]),
 });
 
-const DoItemMovementSchema = z.object({
-  movementType: ItemMovementType,
-  item: z.object().catchall(z.any()),
-  order: z
-    .object({
-      id: ID,
-      type: OrderType,
-      destinationWarehouse: z
-        .union([
-          z
-            .object({
-              id: ID,
-            })
-            .optional(),
-          z.null(),
-        ])
-        .optional()
-        .default(null),
-      sourceWarehouse: z
-        .union([
-          z
-            .object({
-              id: ID,
-            })
-            .optional(),
-          z.null(),
-        ])
-        .optional()
-        .default(null),
-      containerCode: z.union([z.string(), z.null()]).optional().default(null),
-    })
-    .catchall(z.any())
-    .optional(),
-  product: z.union([z.object({}).catchall(z.any()), z.null()]).default(null),
-  orderProduct: z.object({}).catchall(z.any()),
-  orderState: OrderState,
-  reverse: z.boolean().optional().default(false),
-});
+const DoItemMovementSchema = z
+  .object({
+    movementType: ItemMovementType,
+    item: z.object().catchall(z.any()),
+    order: z
+      .object({
+        id: ID,
+        type: OrderType,
+        destinationWarehouse: z
+          .union([
+            z
+              .object({
+                id: ID,
+              })
+              .optional(),
+            z.null(),
+          ])
+          .optional()
+          .default(null),
+        sourceWarehouse: z
+          .union([
+            z
+              .object({
+                id: ID,
+              })
+              .optional(),
+            z.null(),
+          ])
+          .optional()
+          .default(null),
+        containerCode: z.union([z.string(), z.null()]).optional().default(null),
+      })
+      .catchall(z.any())
+      .optional(),
+    product: z.union([z.object({}).catchall(z.any()), z.null()]).default(null),
+    orderProduct: z.object({}).catchall(z.any()),
+    orderState: OrderState,
+    reverse: z.boolean().optional().default(false),
+  })
+  .catchall(z.any());
 const AddItemToOrderSchema = z.object({
   id: ID,
   item: Item,

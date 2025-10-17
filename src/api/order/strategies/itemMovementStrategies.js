@@ -55,14 +55,24 @@ class PurchaseInStrategy extends ItemMovementStrategy {
       },
       warehouse: order.destinationWarehouse.id,
       containerCode: order.containerCode,
+      cost: orderProduct?.price || 0,
       trx,
     });
   }
 
-  async update({ item, order, orderProduct, orderType, orderState, trx }) {
+  async update({
+    item,
+    order,
+    orderProduct,
+    product,
+    orderType,
+    orderState,
+    trx,
+  }) {
     const updateData = {
       orderProduct: orderProduct.id,
       order: order.id,
+      cost: item?.price || item?.cost || 0,
     };
 
     if (item.warehouse) {

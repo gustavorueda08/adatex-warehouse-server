@@ -493,6 +493,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
               data.containerCode
             ),
             itemNumber: data.itemNumber,
+            cost: data.cost,
             state: ITEM_STATES.AVAILABLE,
           },
         },
