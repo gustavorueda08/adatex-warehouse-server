@@ -52,21 +52,18 @@ const generateOrderNumber = async (strapi, type, trx) => {
   const dateString = `${year}${month}${day}`;
 
   // Obtener la última orden del tipo específico con código que coincida con el patrón de hoy
-  const orders = await strapi.entityService.findMany(
-    "api::order.order",
-    {
-      filters: {
-        type: type,
-        code: {
-          $startsWith: `${prefix}-${dateString}-`,
-        },
+  const orders = await strapi.entityService.findMany("api::order.order", {
+    filters: {
+      type: type,
+      code: {
+        $startsWith: `${prefix}-${dateString}-`,
       },
-      sort: { id: "desc" },
-      limit: 1,
-      fields: ["code"],
-      ...(trx ? { transacting: trx } : {})
-    }
-  );
+    },
+    sort: { id: "desc" },
+    limit: 1,
+    fields: ["code"],
+    ...(trx ? { transacting: trx } : {}),
+  });
 
   let sequence = 1;
 
@@ -147,6 +144,7 @@ const updateOrderProducts = async (
   products,
   orderState,
   orderProductService,
+  warehouse,
   trx
 ) => {
   // Obtener todos los Items actuales y requeridos
@@ -155,9 +153,7 @@ const updateOrderProducts = async (
     .flat();
 
   const itemsFromRequest = products
-    .map(({ product, items }) =>
-      items.map((item) => ({ ...item, product }))
-    )
+    .map(({ product, items }) => items.map((item) => ({ ...item, product })))
     .flat();
 
   // Clasificar items
@@ -191,7 +187,13 @@ const updateOrderProducts = async (
 
   // Agregar nuevos items
   await runInBatches(itemsToAdd, async (itemData) => {
-    const { product: productId, id, sourceWarehouse, parentItem, ...item } = itemData;
+    const {
+      product: productId,
+      id,
+      sourceWarehouse,
+      parentItem,
+      ...item
+    } = itemData;
 
     let product;
     let orderProduct = currentOrder.orderProducts.find(
@@ -200,11 +202,9 @@ const updateOrderProducts = async (
 
     // Si no existe el OrderProduct, crearlo
     if (!orderProduct) {
-      product = await strapi.entityService.findOne(
-        PRODUCT_SERVICE,
-        productId,
-        { transacting: trx }
-      );
+      product = await strapi.entityService.findOne(PRODUCT_SERVICE, productId, {
+        transacting: trx,
+      });
 
       if (!product) {
         throw new Error("El producto no existe");
@@ -332,7 +332,7 @@ const recalculateOrderProducts = async (
     {
       filters: { order: orderId },
       populate: ["product"],
-      transacting: trx
+      transacting: trx,
     }
   );
 

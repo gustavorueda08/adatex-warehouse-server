@@ -37,7 +37,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           status: 500,
           name: "OrderCreationError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }
@@ -81,7 +81,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           status: 500,
           name: "OrderUpdateError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }
@@ -110,7 +110,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           status: 500,
           name: "OrderDeletionError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }
@@ -144,7 +144,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           status: 500,
           name: "ItemAddError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }
@@ -181,7 +181,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           status: 500,
           name: "ItemRemoveError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }
@@ -199,7 +199,9 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
         throw new Error("El id de la orden padre es requerido");
       }
 
-      const { getInvoiceableItemsFromOrder } = require("../utils/invoiceHelpers");
+      const {
+        getInvoiceableItemsFromOrder,
+      } = require("../utils/invoiceHelpers");
       const result = await getInvoiceableItemsFromOrder(parentOrderId);
 
       return {
@@ -213,7 +215,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           status: 500,
           name: "InvoiceableItemsError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }
@@ -276,7 +278,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           status: 500,
           name: "PartialInvoiceCreationError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }

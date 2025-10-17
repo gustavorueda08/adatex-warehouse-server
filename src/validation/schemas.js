@@ -43,7 +43,10 @@ const Item = z.object({
   warehouse: z.union([ID, z.null()]).optional().default(null),
   // Campos para transformaciones
   sourceItemId: z.union([ID, z.null()]).optional().default(null),
-  sourceQuantityConsumed: z.union([z.number(), z.null()]).optional().default(null),
+  sourceQuantityConsumed: z
+    .union([z.number(), z.null()])
+    .optional()
+    .default(null),
   targetQuantity: z.union([z.number(), z.null()]).optional().default(null),
 });
 
@@ -60,7 +63,7 @@ const CreateItemSchema = z.object({
   state: ItemState,
   sourceOrder: ID,
   containerCode: z
-    .union([z.string(), z.number()])
+    .union([z.string(), z.number(), z.null()])
     .transform(String)
     .optional()
     .default(null),
@@ -258,6 +261,7 @@ const DoItemMovementSchema = z.object({
         ])
         .optional()
         .default(null),
+      containerCode: z.union([ID, z.null()]).optional().default(null),
     })
     .catchall(z.any())
     .optional(),
