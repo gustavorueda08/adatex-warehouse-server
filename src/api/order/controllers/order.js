@@ -228,7 +228,8 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
    *   parentOrder: orderId,
    *   customer: customerId,
    *   customerForInvoice: customerId,
-   *   products: [{ product: productId, quantity: X }]
+   *   products: [{ product: productId, quantity: X }],
+   *   notes?: string
    * }
    */
   async createPartialInvoice(ctx) {
@@ -244,20 +245,32 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
         throw new Error("Se requiere un array de productos con cantidades");
       }
 
+      // Validar que los productos tengan la estructura correcta
+      for (const p of data.products) {
+        if (!p.product) {
+          throw new Error("Cada producto debe tener el campo 'product'");
+        }
+        if (!p.quantity || p.quantity <= 0) {
+          throw new Error(
+            "Cada producto debe tener una cantidad mayor a 0"
+          );
+        }
+      }
+
       // Construir la orden de tipo partial-invoice
       const orderData = {
         type: "partial-invoice",
         parentOrder: data.parentOrder,
         customer: data.customer,
         customerForInvoice: data.customerForInvoice,
-        notes: data.notes || "Facturación parcial automática",
+        notes: data.notes || "Facturación parcial automática (FIFO)",
         products: data.products.map((p) => ({
           product: p.product,
           requestedQuantity: p.quantity || 0,
           items: [
             {
               quantity: p.quantity,
-              // La estrategia buscará automáticamente los items
+              // La estrategia buscará automáticamente los items usando FIFO
             },
           ],
         })),
@@ -269,6 +282,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
         data: order,
         meta: {
           message: "Orden de facturación parcial creada exitosamente",
+          type: "fifo-automatic",
         },
       };
     } catch (error) {
