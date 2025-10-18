@@ -220,7 +220,11 @@ const UpdateOrderSchema = z.object({
           orderProduct: ID.optional().default(null),
           product: ID,
           items: z.array(Item).optional().default([]),
-          requestedQuantity: z.number().optional().default(null),
+          requestedQuantity: z
+            .union([z.string(), z.number()])
+            .transform(Number)
+            .optional()
+            .default(null),
         })
         .catchall(z.any())
     )
