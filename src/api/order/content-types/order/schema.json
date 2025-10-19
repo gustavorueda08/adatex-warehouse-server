@@ -202,6 +202,10 @@
     "siigoId": {
       "type": "uid"
     },
+    "emitInvoice": {
+      "type": "boolean",
+      "default": false
+    },
     "items": {
       "type": "relation",
       "relation": "manyToMany",

@@ -37,6 +37,7 @@ const generateOrderNumber = async (strapi, type, trx) => {
     transform: "TF",
     out: "OUT",
     in: "IN",
+    "partial-invoice": "PI",
   };
 
   const prefix = prefixMap[type];
@@ -369,6 +370,9 @@ const recalculateOrderProducts = async (
   await runInBatches(orderProducts, async (orderProduct) => {
     const { product } = orderProduct;
     const dataFromRequest = products.find((p) => p.product === product.id);
+    if (!dataFromRequest) return;
+    console.log(orderProducts, "DATOS DEL REQUEST", products);
+
     const {
       items,
       orderProduct: _,

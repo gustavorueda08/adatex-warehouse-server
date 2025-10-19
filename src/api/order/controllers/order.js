@@ -49,6 +49,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       const orderService = strapi.service(ORDER_SERVICE);
       const { orderId } = ctx.params;
       const data = ctx.request.body;
+      console.log("DATOS", data);
 
       if (!orderId) {
         throw new Error("El id de la orden es requerido");
@@ -251,9 +252,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           throw new Error("Cada producto debe tener el campo 'product'");
         }
         if (!p.quantity || p.quantity <= 0) {
-          throw new Error(
-            "Cada producto debe tener una cantidad mayor a 0"
-          );
+          throw new Error("Cada producto debe tener una cantidad mayor a 0");
         }
       }
 

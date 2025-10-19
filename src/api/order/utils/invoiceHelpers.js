@@ -34,6 +34,8 @@ async function findInvoiceableItemsByQuantity({ customerId, productId, quantity,
       "orderProducts",
       "orderProducts.product",
       "orderProducts.items",
+      "orderProducts.items.orders",
+      "orderProducts.items.orderProducts",
     ],
     sort: { actualDispatchDate: "asc" }, // FIFO: más antiguos primero
     transacting: trx,
@@ -157,6 +159,14 @@ async function validatePartialInvoiceOrder(orderData, options = {}) {
     errors.push("La orden padre ya está facturada (tiene siigoId)");
   }
 
+  // Validar que la orden padre NO tenga emitInvoice: true
+  // (si tiene emitInvoice: true, debería facturarse completa al completarse, no parcialmente)
+  if (parentOrder.emitInvoice === true) {
+    errors.push(
+      "La orden padre tiene emitInvoice: true, no se puede facturar parcialmente. Debe facturarse completa al completarse."
+    );
+  }
+
   // Si se especifican items por ID, validar que pertenezcan a la orden padre
   if (orderData.products && Array.isArray(orderData.products)) {
     for (const productData of orderData.products) {
@@ -249,6 +259,8 @@ async function getInvoiceableItemsFromOrder(orderId, options = {}) {
         code: product.code,
         unit: product.unit,
       },
+      price: orderProduct.price || 0,
+      ivaIncluded: orderProduct.ivaIncluded || false,
       totalQuantity,
       itemCount: invoiceableItems.length,
       items: invoiceableItems.map((item) => ({

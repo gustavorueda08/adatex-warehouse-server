@@ -796,7 +796,7 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
         ITEM_SERVICE,
         item.id,
         {
-          populate: ["orders", "product"],
+          populate: ["orders", "orderProducts", "product"],
           transacting: trx,
         }
       );
@@ -815,11 +815,13 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
         );
       }
 
-      // Asociar el item a la orden (relación many-to-many)
+      // Asociar el item a la orden y al orderProduct (relaciones many-to-many)
       const currentOrders = existingItem.orders?.map((o) => o.id) || [];
+      const currentOrderProducts = existingItem.orderProducts?.map((op) => op.id) || [];
       await strapi.entityService.update(ITEM_SERVICE, item.id, {
         data: {
           orders: [...currentOrders, order.id],
+          orderProducts: [...currentOrderProducts, orderProduct.id],
         },
         transacting: trx,
       });
@@ -842,14 +844,16 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
         options: { trx },
       });
 
-      // Asociar todos los items seleccionados a la orden
+      // Asociar todos los items seleccionados a la orden y al orderProduct
       for (const selectedItem of selectedItems) {
         const existingItem = selectedItem.item;
         const currentOrders = existingItem.orders?.map((o) => o.id) || [];
+        const currentOrderProducts = existingItem.orderProducts?.map((op) => op.id) || [];
 
         await strapi.entityService.update(ITEM_SERVICE, existingItem.id, {
           data: {
             orders: [...currentOrders, order.id],
+            orderProducts: [...currentOrderProducts, orderProduct.id],
           },
           transacting: trx,
         });
@@ -906,12 +910,12 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
     const { unmarkItemsAsInvoiced } = require("../utils/invoiceHelpers");
     const { ITEM_SERVICE } = require("../../../utils/services");
 
-    // Obtener el item con sus órdenes
+    // Obtener el item con sus órdenes y orderProducts
     const existingItem = await strapi.entityService.findOne(
       ITEM_SERVICE,
       item.id,
       {
-        populate: ["orders"],
+        populate: ["orders", "orderProducts"],
         transacting: trx,
       }
     );
@@ -920,14 +924,19 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
       return item;
     }
 
-    // Desasociar el item de esta orden (mantener otras órdenes)
+    // Desasociar el item de esta orden y orderProduct (mantener otras relaciones)
     const updatedOrders = (existingItem.orders || [])
       .filter((o) => o.id !== order.id)
       .map((o) => o.id);
 
+    const updatedOrderProducts = (existingItem.orderProducts || [])
+      .filter((op) => op.id !== orderProduct.id)
+      .map((op) => op.id);
+
     await strapi.entityService.update(ITEM_SERVICE, item.id, {
       data: {
         orders: updatedOrders,
+        orderProducts: updatedOrderProducts,
       },
       transacting: trx,
     });

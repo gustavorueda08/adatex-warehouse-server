@@ -719,6 +719,7 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
       'manyToOne',
       'plugin::users-permissions.user'
     >;
+    emitInvoice: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     estimatedDepositPaymentDate: Schema.Attribute.Date;
     estimatedDispatchDate: Schema.Attribute.Date;
     estimatedWarehouseDate: Schema.Attribute.Date;

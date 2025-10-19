@@ -14,29 +14,24 @@ module.exports = {
 
       // Verificar si la orden cambió a estado 'completed'
       if (result && result.state === "completed") {
-        // Obtener la orden anterior para comparar
-        const previousOrder = await strapi.entityService.findOne(
-          "api::order.order",
-          result.id,
-          {
-            populate: ["customerForInvoice"],
-          }
-        );
-
-        // Solo proceder si:
-        // 1. Es una orden de tipo 'sale' o 'partial-invoice'
-        // 2. Tiene customerForInvoice
-        // 3. No tiene ya un siigoId (no está facturada)
-        // 4. La variable de entorno permite auto-facturación
+        // Verificar si debe facturarse automáticamente
+        // Lógica:
+        // - Para 'partial-invoice': SIEMPRE facturar (es su propósito)
+        // - Para 'sale': Solo si emitInvoice === true (venta con factura directa)
+        // - Para otros tipos: NO facturar
         const autoInvoicing =
           process.env.SIIGO_AUTO_INVOICE_ON_COMPLETE === "true";
 
-        if (
-          (result.type === "sale" || result.type === "partial-invoice") &&
+        const isPartialInvoice = result.type === "partial-invoice";
+        const isSaleWithInvoice = result.type === "sale" && result.emitInvoice === true;
+
+        const shouldInvoice =
+          (isPartialInvoice || isSaleWithInvoice) &&
           result.customerForInvoice &&
           !result.siigoId &&
-          autoInvoicing
-        ) {
+          autoInvoicing;
+
+        if (shouldInvoice) {
           console.log(
             `Order ${result.code} completada. Iniciando facturación automática...`
           );

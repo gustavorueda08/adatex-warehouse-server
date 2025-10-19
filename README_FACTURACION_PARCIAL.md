@@ -116,13 +116,16 @@ PUT /api/orders/:orderId
 ### Paso 2: Ejemplo Completo
 
 ```bash
-# 1. Crear remisión
+# OPCIÓN A: Remisión + Factura Parcial
+
+# 1. Crear remisión (emitInvoice: false por defecto)
 curl -X POST http://localhost:1337/api/orders \
-  -d '{"data": {"type": "sale", "customer": 5, ...}}'
+  -d '{"data": {"type": "sale", "customer": 5, "emitInvoice": false, ...}}'
 
 # 2. Completar sin facturar
 curl -X PUT http://localhost:1337/api/orders/123 \
   -d '{"data": {"state": "completed"}}'
+# Backend NO factura porque emitInvoice: false
 
 # 3. Ver balance
 curl http://localhost:1337/api/customers/5/consignment-balance
@@ -134,9 +137,21 @@ curl -X POST http://localhost:1337/api/orders/create-partial-invoice \
 # 5. Completar factura
 curl -X PUT http://localhost:1337/api/orders/125 \
   -d '{"data": {"state": "completed"}}'
+# Backend SÍ factura porque es type: "partial-invoice"
 
 # 6. Verificar balance actualizado
 curl http://localhost:1337/api/customers/5/consignment-balance
+
+# OPCIÓN B: Venta con Factura Directa
+
+# 1. Crear venta con factura
+curl -X POST http://localhost:1337/api/orders \
+  -d '{"data": {"type": "sale", "customer": 5, "customerForInvoice": 5, "emitInvoice": true, ...}}'
+
+# 2. Completar (auto-factura en Siigo)
+curl -X PUT http://localhost:1337/api/orders/130 \
+  -d '{"data": {"state": "completed"}}'
+# Backend SÍ factura porque emitInvoice: true
 ```
 
 ---
@@ -149,6 +164,7 @@ curl http://localhost:1337/api/customers/5/consignment-balance
   "id": 123,
   "type": "sale",
   "state": "completed",
+  "emitInvoice": false,  // ← NO facturar automáticamente
   "siigoId": null,  // ← Sin facturar = REMISIÓN
   "items": [
     {
@@ -204,15 +220,22 @@ curl http://localhost:1337/api/customers/5/consignment-balance
 ## 🔑 Conceptos Clave
 
 ### Remisión
-- Orden de venta (`type: "sale"`) **completada** pero **SIN** `siigoId`
+- Orden de venta (`type: "sale"`) **completada** con `emitInvoice: false`
+- **SIN** `siigoId` (no facturada)
 - Items en estado `"sold"` con `isInvoiced: false`
 - Inventario en poder del cliente pero no facturado
+
+### Venta con Factura Directa
+- Orden de venta (`type: "sale"`) con `emitInvoice: true`
+- Al completarse, **automáticamente** se factura en Siigo
+- Genera `siigoId` al completar
+- Útil para ventas que se facturan inmediatamente
 
 ### Facturación Parcial
 - Orden de tipo `"partial-invoice"` vinculada a orden padre
 - NO mueve inventario físico
 - Solo asocia items existentes para facturación
-- Genera `siigoId` al completarse
+- **SIEMPRE** genera `siigoId` al completarse (independiente de `emitInvoice`)
 - Marca items como `isInvoiced: true`
 
 ### FIFO (First In, First Out)
@@ -356,27 +379,46 @@ Ver más ejemplos en [EJEMPLOS_API_REQUESTS.md](EJEMPLOS_API_REQUESTS.md).
 
 ## 📊 Flujo de Estados
 
+### Flujo A: Remisión → Factura Parcial
 ```
-┌─────────────┐
-│ SALE draft  │
-└──────┬──────┘
-       │ Completar SIN customerForInvoice
-       ▼
-┌──────────────┐
-│SALE completed│  ← REMISIÓN
-│ siigoId:null │
-└──────┬───────┘
-       │ Crear factura parcial
-       ▼
 ┌────────────────┐
-│ PI draft       │
-│ parentOrder:123│
-└──────┬─────────┘
-       │ Completar
-       ▼
+│ SALE draft     │
+│emitInvoice:null│
+└───────┬────────┘
+        │ Completar con emitInvoice: false
+        ▼
 ┌────────────────┐
-│ PI completed   │  ← FACTURADA
-│ siigoId:FV-123 │
+│SALE completed  │  ← REMISIÓN (NO factura)
+│emitInvoice:false│
+│siigoId: null   │
+└───────┬────────┘
+        │ Crear factura parcial
+        ▼
+┌─────────────────┐
+│PI draft         │
+│parentOrder: 123 │
+└───────┬─────────┘
+        │ Completar
+        ▼
+┌─────────────────┐
+│PI completed     │  ← FACTURADA en Siigo
+│siigoId: FV-123  │
+└─────────────────┘
+```
+
+### Flujo B: Venta con Factura Directa
+```
+┌────────────────┐
+│SALE draft      │
+│emitInvoice:true│
+│customerFor...  │
+└───────┬────────┘
+        │ Completar
+        ▼
+┌────────────────┐
+│SALE completed  │  ← AUTO-FACTURADA en Siigo
+│emitInvoice:true│
+│siigoId: FV-456 │
 └────────────────┘
 ```
 

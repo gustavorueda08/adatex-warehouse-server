@@ -72,6 +72,22 @@ module.exports = ({ strapi }) => ({
           },
         });
 
+        // Marcar items como facturados
+        const orderWithItems = await strapi.entityService.findOne(
+          ORDER_SERVICE,
+          orderId,
+          { populate: ["items"] }
+        );
+
+        const itemIds = orderWithItems.items?.map((i) => i.id) || [];
+        if (itemIds.length > 0) {
+          const { markItemsAsInvoiced } = require("../../order/utils/invoiceHelpers");
+          await markItemsAsInvoiced(itemIds);
+          console.log(
+            `[TEST MODE] ${itemIds.length} items marcados como facturados`
+          );
+        }
+
         console.log(
           `[TEST MODE] Factura simulada creada. ID: ${fakeInvoice.id}`
         );
@@ -154,6 +170,20 @@ module.exports = ({ strapi }) => ({
           invoiceNumber: siigoInvoice.number || siigoInvoice.id,
         },
       });
+
+      // Marcar items como facturados
+      const orderWithItems = await strapi.entityService.findOne(
+        ORDER_SERVICE,
+        orderId,
+        { populate: ["items"] }
+      );
+
+      const itemIds = orderWithItems.items?.map((i) => i.id) || [];
+      if (itemIds.length > 0) {
+        const { markItemsAsInvoiced } = require("../../order/utils/invoiceHelpers");
+        await markItemsAsInvoiced(itemIds);
+        console.log(`${itemIds.length} items marcados como facturados`);
+      }
 
       console.log(
         `Order ${order.code} actualizada con siigoId: ${siigoInvoice.id}`

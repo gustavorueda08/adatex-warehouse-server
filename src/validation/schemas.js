@@ -198,7 +198,7 @@ const CreateOrderSchema = z
             )
             .optional()
             .default([]),
-          price: z.number().optional().default(null),
+          price: z.union([z.number(), z.null()]).optional().default(null),
           name: z.string().optional().default(null),
         })
       )
