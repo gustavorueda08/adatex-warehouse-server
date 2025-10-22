@@ -316,6 +316,7 @@ async function markItemsAsInvoiced(itemIds, options = {}) {
         data: {
           isInvoiced: true,
           invoicedDate: moment(invoicedDate).toDate(),
+          warehouse: null, // Remover warehouse cuando se factura (salida definitiva)
         },
         transacting: trx,
       })

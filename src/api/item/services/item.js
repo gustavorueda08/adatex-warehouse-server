@@ -292,6 +292,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
    * @param {boolean} reverse - Si es una reversión de la operación
    * @param {number} orderId - ID de la orden
    * @param {number} orderProductId - ID del orderProduct
+   * @param {number|null} recoveredWarehouse - Warehouse recuperado desde movements (para reversión)
    * @returns {Object|null} Datos del movimiento de estado o null si no hay cambios
    */
   _processItemStateChanges(
@@ -300,7 +301,8 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
     orderType,
     reverse,
     orderId,
-    orderProductId
+    orderProductId,
+    recoveredWarehouse = null
   ) {
     if (currentItem.state === updatedItem.state) {
       return null;
@@ -321,15 +323,24 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           return {
             ...baseMovement,
             type: UNRESERVE,
-            reason: "Cambio de estado a disponible por cancelación de reserva",
+            destinationWarehouse: recoveredWarehouse,
+            reason: recoveredWarehouse
+              ? "Cambio de estado a disponible por cancelación de venta - recuperando bodega"
+              : "Cambio de estado a disponible por cancelación de reserva",
           };
         }
         return {
           ...baseMovement,
           type: updatedItem.state === ITEM_STATES.SOLD ? OUT : RESERVE,
+          sourceWarehouse:
+            updatedItem.state === ITEM_STATES.SOLD
+              ? currentItem.warehouse?.id
+              : undefined,
           reason:
             updatedItem.state === ITEM_STATES.SOLD
-              ? "Item vendido y despachado"
+              ? updatedItem.isInvoiced
+                ? "Item vendido y facturado - salida definitiva de bodega"
+                : "Item vendido"
               : "Cambio de estado por orden de venta",
         };
 
@@ -365,6 +376,37 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       default:
         return null;
     }
+  },
+
+  /**
+   * Obtiene el último warehouse del item desde su último movement OUT
+   * @private
+   * @param {Object} item - Item del cual obtener el warehouse
+   * @param {Object} trx - Transacción de base de datos (opcional)
+   * @returns {Promise<number|null>} ID del warehouse o null
+   */
+  async _getLastWarehouseFromMovements(item, trx = null) {
+    // Buscar el último movement de tipo OUT del item que tenga sourceWarehouse
+    const movements = await strapi.entityService.findMany(
+      INVENTORY_MOVEMENT_SERVICE,
+      {
+        filters: {
+          item: item.id,
+          type: OUT,
+          sourceWarehouse: { $notNull: true },
+        },
+        sort: { createdAt: "desc" },
+        limit: 1,
+        populate: ["sourceWarehouse"],
+      },
+      trx ? { transacting: trx } : {}
+    );
+
+    if (movements.length > 0 && movements[0].sourceWarehouse) {
+      return movements[0].sourceWarehouse.id;
+    }
+
+    return null;
   },
 
   /**
@@ -412,6 +454,8 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       justAvailableItems,
       trx,
     } = searchCriteria;
+
+    console.log(barcode, "BARCODE");
 
     // Estrategia 1: Búsqueda por ID
     if (id) {
@@ -659,6 +703,23 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           ._cleanupBarcodeMappings(currentItem.id, order, data.trx);
       }
 
+      // Si es una reversión y el item está en estado SOLD sin warehouse,
+      // intentar recuperar el warehouse desde el último movement OUT
+      let recoveredWarehouse = null;
+      if (
+        reverse &&
+        currentItem.state === ITEM_STATES.SOLD &&
+        !currentItem.warehouse
+      ) {
+        recoveredWarehouse = await strapi
+          .service(ITEM_SERVICE)
+          ._getLastWarehouseFromMovements(currentItem, data.trx);
+
+        if (recoveredWarehouse) {
+          dataToUpdate.warehouse = recoveredWarehouse;
+        }
+      }
+
       // Actualizar el item
       const updatedItem = await strapi.entityService.update(
         ITEM_SERVICE,
@@ -703,7 +764,8 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           type,
           reverse,
           order,
-          orderProduct
+          orderProduct,
+          recoveredWarehouse
         );
       if (stateChange) {
         changes.push(stateChange);
@@ -717,7 +779,6 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           data.trx ? { transacting: data.trx } : {}
         );
       });
-
       return { ...updatedItem, movements };
     } catch (error) {
       throw error;

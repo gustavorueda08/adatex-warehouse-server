@@ -21,7 +21,8 @@
         "transfer",
         "adjustment",
         "reserve",
-        "unreserve"
+        "unreserve",
+        "transform"
       ]
     },
     "quantity": {

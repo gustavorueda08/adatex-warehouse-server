@@ -130,6 +130,8 @@ class SaleStrategy extends ItemMovementStrategy {
       justAvailableItems: true, // Solo buscar items disponibles
     };
 
+    console.log(item, "ITEM");
+
     // Determinar cómo buscar el item
     if (item.id) {
       updatePayload.id = item.id;
@@ -817,7 +819,8 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
 
       // Asociar el item a la orden y al orderProduct (relaciones many-to-many)
       const currentOrders = existingItem.orders?.map((o) => o.id) || [];
-      const currentOrderProducts = existingItem.orderProducts?.map((op) => op.id) || [];
+      const currentOrderProducts =
+        existingItem.orderProducts?.map((op) => op.id) || [];
       await strapi.entityService.update(ITEM_SERVICE, item.id, {
         data: {
           orders: [...currentOrders, order.id],
@@ -848,7 +851,8 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
       for (const selectedItem of selectedItems) {
         const existingItem = selectedItem.item;
         const currentOrders = existingItem.orders?.map((o) => o.id) || [];
-        const currentOrderProducts = existingItem.orderProducts?.map((op) => op.id) || [];
+        const currentOrderProducts =
+          existingItem.orderProducts?.map((op) => op.id) || [];
 
         await strapi.entityService.update(ITEM_SERVICE, existingItem.id, {
           data: {

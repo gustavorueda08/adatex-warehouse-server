@@ -517,7 +517,16 @@ export interface ApiInventoryMovementInventoryMovement
       'api::warehouse.warehouse'
     >;
     type: Schema.Attribute.Enumeration<
-      ['in', 'return', 'out', 'transfer', 'adjustment', 'reserve', 'unreserve']
+      [
+        'in',
+        'return',
+        'out',
+        'transfer',
+        'adjustment',
+        'reserve',
+        'unreserve',
+        'transform',
+      ]
     > &
       Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
