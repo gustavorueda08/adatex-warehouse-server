@@ -10,5 +10,10 @@ module.exports = {
       method: "GET",
       handler: "customer.getConsignmentHistory",
     },
+    {
+      path: "/customers/sync-from-siigo",
+      method: "GET",
+      handler: "customer.syncFromSiigo",
+    },
   ],
 };

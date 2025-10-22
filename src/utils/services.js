@@ -9,6 +9,8 @@ const services = {
   ACCOUNTING_SERVICE: "api::accounting.accounting",
   PRODUCT_SERVICE: "api::product.product",
   CUSTOMER_SERVICE: "api::customer.customer",
+  SUPPLIER_SERVICE: "api::supplier.supplier",
+  TAX_SERVICE: "api::tax.tax",
 };
 
 module.exports = services;

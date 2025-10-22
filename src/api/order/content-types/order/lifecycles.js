@@ -23,43 +23,61 @@ module.exports = {
           process.env.SIIGO_AUTO_INVOICE_ON_COMPLETE === "true";
 
         const isPartialInvoice = result.type === "partial-invoice";
-        const isSaleWithInvoice = result.type === "sale" && result.emitInvoice === true;
+        const isSaleWithInvoice =
+          result.type === "sale" && result.emitInvoice === true;
 
         const shouldInvoice =
           (isPartialInvoice || isSaleWithInvoice) &&
           result.customerForInvoice &&
-          !result.siigoId &&
-          autoInvoicing;
+          !result.siigoId;
 
         if (shouldInvoice) {
           console.log(
             `Order ${result.code} completada. Iniciando facturación automática...`
           );
 
-          // Ejecutar creación de factura de forma asíncrona
-          // No bloqueamos el update de la orden
-          setImmediate(async () => {
-            try {
-              const invoiceService = strapi.service("api::siigo.invoice");
-              const invoiceResult = await invoiceService.createInvoiceForOrder(
-                result.id
-              );
+          try {
+            const invoiceService = strapi.service("api::siigo.invoice");
+            const invoiceResult = await invoiceService.createInvoiceForOrder(
+              result.id
+            );
 
-              console.log(
-                `Factura creada automáticamente para Order ${result.code}. Siigo ID: ${invoiceResult.invoice.siigoId}`
-              );
-            } catch (error) {
-              console.error(
-                `Error al crear factura automática para Order ${result.code}:`,
-                error.message
-              );
+            console.log(
+              `Factura creada automáticamente para Order ${result.code}. Siigo ID: ${invoiceResult.invoice.siigoId}`
+            );
 
-              // Aquí podrías:
-              // 1. Enviar notificación a administradores
-              // 2. Crear un registro de error
-              // 3. Agregar la orden a una cola de reintentos
-            }
-          });
+            // Obtener la orden actualizada con todos los datos
+            const { ORDER_POPULATE } = require("../../utils/orderHelpers");
+            const updatedOrder = await strapi.entityService.findOne(
+              "api::order.order",
+              result.id,
+              { populate: ORDER_POPULATE }
+            );
+
+            // Emitir evento WebSocket con la orden actualizada
+            strapi.io?.to(`order:${result.id}`).emit("order:invoice-created", {
+              order: updatedOrder,
+              invoice: invoiceResult.invoice,
+            });
+
+            console.log(
+              `Evento WebSocket emitido para Order ${result.code} con factura creada`
+            );
+          } catch (error) {
+            console.error(
+              `Error al crear factura automática para Order ${result.code}:`,
+              error.message
+            );
+
+            // Emitir evento de error por WebSocket
+            strapi.io?.to(`order:${result.id}`).emit("order:invoice-error", {
+              orderId: result.id,
+              orderCode: result.code,
+              error: error.message,
+            });
+
+            // No lanzamos el error para no afectar el flujo principal del update
+          }
         }
       }
     } catch (error) {

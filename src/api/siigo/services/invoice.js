@@ -1,6 +1,7 @@
 "use strict";
 
 const { ORDER_SERVICE } = require("../../../utils/services");
+const { siigoFetch } = require("../utils/siigoFetch");
 
 /**
  * Servicio de creación y gestión de facturas en Siigo
@@ -64,8 +65,9 @@ module.exports = ({ strapi }) => ({
           status: "test",
         };
 
-        // Actualizar orden con el siigoId falso
-        await strapi.entityService.update(ORDER_SERVICE, orderId, {
+        // Actualizar orden con el siigoId falso usando db.query
+        await strapi.db.query(ORDER_SERVICE).update({
+          where: { id: orderId },
           data: {
             siigoId: String(fakeInvoice.id),
             invoiceNumber: fakeInvoice.number,
@@ -115,7 +117,7 @@ module.exports = ({ strapi }) => ({
 
       let response;
       try {
-        response = await fetch(`${apiUrl}/v1/invoices`, {
+        response = await siigoFetch(`${apiUrl}/v1/invoices`, {
           method: "POST",
           headers,
           body: JSON.stringify(invoiceData),
@@ -131,7 +133,7 @@ module.exports = ({ strapi }) => ({
             authService.invalidateToken();
             const newHeaders = await authService.getAuthHeaders();
 
-            response = await fetch(`${apiUrl}/v1/invoices`, {
+            response = await siigoFetch(`${apiUrl}/v1/invoices`, {
               method: "POST",
               headers: newHeaders,
               body: JSON.stringify(invoiceData),
@@ -163,8 +165,9 @@ module.exports = ({ strapi }) => ({
         `Factura creada exitosamente en Siigo. ID: ${siigoInvoice.id}`
       );
 
-      // Actualizar orden con el siigoId de la factura
-      await strapi.entityService.update(ORDER_SERVICE, orderId, {
+      // Actualizar orden con el siigoId de la factura usando db.query
+      await strapi.db.query(ORDER_SERVICE).update({
+        where: { id: orderId },
         data: {
           siigoId: String(siigoInvoice.id),
           invoiceNumber: siigoInvoice.number || siigoInvoice.id,
@@ -237,7 +240,7 @@ module.exports = ({ strapi }) => ({
       const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await fetch(
+      const response = await siigoFetch(
         `${apiUrl}/v1/invoices/${siigoInvoiceId}`,
         {
           method: "GET",

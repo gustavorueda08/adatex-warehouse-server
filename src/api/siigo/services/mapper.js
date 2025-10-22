@@ -316,4 +316,282 @@ module.exports = ({ strapi }) => ({
       errors,
     };
   },
+
+  /**
+   * ============================================
+   * MAPEOS BIDIRECCIONALES
+   * ============================================
+   */
+
+  /**
+   * Mapea un Tax de Siigo a formato local
+   * @param {Object} siigoTax - Tax de Siigo
+   * @returns {Object} - Tax en formato local
+   */
+  mapSiigoToTax(siigoTax) {
+    return {
+      name: siigoTax.name || `Tax ${siigoTax.id}`,
+      amount: parseFloat(siigoTax.percentage || 0),
+      type: "percentage", // Siigo maneja principalmente porcentajes
+      applicationType: "auto",
+      siigoCode: String(siigoTax.id),
+      use: "increment", // Por defecto incremento (IVA)
+    };
+  },
+
+  /**
+   * Mapea un Tax local a formato Siigo
+   * @param {Object} localTax - Tax local
+   * @returns {Object} - Tax en formato Siigo
+   */
+  mapTaxToSiigo(localTax) {
+    return {
+      id: localTax.siigoCode ? parseInt(localTax.siigoCode) : null,
+      name: localTax.name,
+      percentage: parseFloat(localTax.amount),
+    };
+  },
+
+  /**
+   * Mapea un Customer local a formato Siigo
+   * @param {Object} customer - Customer local con populate de taxes
+   * @returns {Object} - Customer en formato Siigo
+   */
+  async mapCustomerToSiigo(customer) {
+    // Determinar si es persona o empresa basado en el nombre
+    const isCompany = !customer.name.includes(" ") || customer.name.length > 50;
+
+    const siigoCustomer = {
+      type: "Customer",
+      person_type: isCompany ? "Company" : "Person",
+      id_type: customer.identificationType || "31", // 31 = NIT por defecto
+      identification: customer.identification,
+      name: isCompany ? [customer.name] : customer.name.split(" "),
+      active: customer.isActive !== false,
+    };
+
+    // Agregar contactos si hay email o phone
+    if (customer.email || customer.phone) {
+      siigoCustomer.contacts = [
+        {
+          first_name: customer.name.split(" ")[0] || customer.name,
+          last_name: customer.name.split(" ")[1] || "",
+          email: customer.email || "",
+          phone: {
+            number: customer.phone || "",
+          },
+        },
+      ];
+    }
+
+    // Agregar dirección si existe
+    if (customer.address) {
+      siigoCustomer.address = {
+        address: customer.address,
+        city: {
+          country_code: "Co", // Colombia por defecto
+          state_code: "19", // Código por defecto
+          city_code: customer.cityCode || "001", // Bogotá por defecto
+        },
+        postal_code: customer.postalCode || "",
+      };
+    }
+
+    // Agregar términos de pago si existen
+    if (customer.paymentTerms) {
+      siigoCustomer.payment_terms = {
+        id: customer.paymentTerms,
+      };
+    }
+
+    return siigoCustomer;
+  },
+
+  /**
+   * Mapea un Customer de Siigo a formato local
+   * @param {Object} siigoCustomer - Customer de Siigo
+   * @returns {Object} - Customer en formato local
+   */
+  async mapSiigoToCustomer(siigoCustomer) {
+    const localCustomer = {
+      siigoId: String(siigoCustomer.id),
+      identification: siigoCustomer.identification,
+      name: Array.isArray(siigoCustomer.name)
+        ? siigoCustomer.name.join(" ")
+        : siigoCustomer.name,
+      isActive: siigoCustomer.active !== false,
+    };
+
+    // Extraer email y phone del primer contacto
+    if (siigoCustomer.contacts && siigoCustomer.contacts.length > 0) {
+      const contact = siigoCustomer.contacts[0];
+      localCustomer.email = contact.email || "";
+      if (contact.phone && contact.phone.number) {
+        localCustomer.phone = contact.phone.number;
+      }
+    }
+
+    // Extraer dirección
+    if (siigoCustomer.address) {
+      localCustomer.address = siigoCustomer.address.address || "";
+      if (siigoCustomer.address.city) {
+        localCustomer.cityCode = siigoCustomer.address.city.city_code;
+      }
+      localCustomer.postalCode = siigoCustomer.address.postal_code || "";
+    }
+
+    // Extraer términos de pago
+    if (siigoCustomer.payment_terms) {
+      localCustomer.paymentTerms = siigoCustomer.payment_terms.days || 0;
+    }
+
+    return localCustomer;
+  },
+
+  /**
+   * Mapea un Supplier local a formato Siigo
+   * @param {Object} supplier - Supplier local
+   * @returns {Object} - Supplier en formato Siigo (como Customer tipo Provider)
+   */
+  async mapSupplierToSiigo(supplier) {
+    const siigoSupplier = {
+      type: "Supplier",
+      person_type: "Company",
+      id_type: "31", // NIT
+      identification: supplier.code, // Usar code como identification
+      name: [supplier.name],
+      active: supplier.isActive !== false,
+    };
+
+    // Agregar contacto si hay email
+    if (supplier.email) {
+      siigoSupplier.contacts = [
+        {
+          first_name: supplier.name,
+          last_name: "",
+          email: supplier.email,
+        },
+      ];
+    }
+
+    // Agregar dirección
+    if (supplier.address) {
+      siigoSupplier.address = {
+        address: supplier.address,
+        city: {
+          country_code: supplier.country || "Co",
+          state_code: supplier.state || "19",
+          city_code: supplier.cityCode || "001",
+        },
+        postal_code: supplier.postalCode || "",
+      };
+    }
+
+    return siigoSupplier;
+  },
+
+  /**
+   * Mapea un Supplier de Siigo a formato local
+   * @param {Object} siigoSupplier - Supplier de Siigo
+   * @returns {Object} - Supplier en formato local
+   */
+  async mapSiigoToSupplier(siigoSupplier) {
+    const localSupplier = {
+      siigoId: String(siigoSupplier.id),
+      code: siigoSupplier.identification,
+      name: Array.isArray(siigoSupplier.name)
+        ? siigoSupplier.name.join(" ")
+        : siigoSupplier.name,
+      isActive: siigoSupplier.active !== false,
+    };
+
+    // Extraer email del primer contacto
+    if (siigoSupplier.contacts && siigoSupplier.contacts.length > 0) {
+      localSupplier.email = siigoSupplier.contacts[0].email || "";
+    }
+
+    // Extraer dirección
+    if (siigoSupplier.address) {
+      localSupplier.address = siigoSupplier.address.address || "";
+      if (siigoSupplier.address.city) {
+        localSupplier.country = siigoSupplier.address.city.country_code || "Co";
+        localSupplier.state = siigoSupplier.address.city.state_code || "";
+        localSupplier.cityCode = siigoSupplier.address.city.city_code || "";
+      }
+      localSupplier.postalCode = siigoSupplier.address.postal_code || "";
+    }
+
+    return localSupplier;
+  },
+
+  /**
+   * Mapea un Product local a formato Siigo
+   * @param {Object} product - Product local con populate de taxes
+   * @returns {Object} - Product en formato Siigo
+   */
+  async mapProductToSiigo(product) {
+    const siigoProduct = {
+      code: product.code,
+      name: product.name,
+      description: product.description || product.name,
+      type: "Product", // Por defecto producto
+      active: product.isActive !== false,
+    };
+
+    // Mapear unidad de medida
+    const unitMap = {
+      kg: "Kilogram",
+      m: "Meter",
+      unit: "Unit",
+      piece: "Unit",
+    };
+    siigoProduct.unit = unitMap[product.unit] || "Unit";
+
+    // Agregar barcode como reference
+    if (product.barcode) {
+      siigoProduct.reference = product.barcode;
+    }
+
+    // Agregar account_group (requerido por Siigo)
+    siigoProduct.account_group = parseInt(
+      process.env.SIIGO_PRODUCT_ACCOUNT_GROUP || "1"
+    );
+
+    // Clasificación fiscal (por defecto gravado)
+    siigoProduct.tax_classification = "Taxed";
+
+    return siigoProduct;
+  },
+
+  /**
+   * Mapea un Product de Siigo a formato local
+   * @param {Object} siigoProduct - Product de Siigo
+   * @returns {Object} - Product en formato local
+   */
+  async mapSiigoToProduct(siigoProduct) {
+    const localProduct = {
+      siigoId: String(siigoProduct.id),
+      code: siigoProduct.code,
+      name: siigoProduct.name,
+      description: siigoProduct.description || "",
+      isActive: siigoProduct.active !== false,
+    };
+
+    // Mapear unidad de medida inversa
+    const unitMap = {
+      Kilogram: "kg",
+      Meter: "m",
+      Unit: "unit",
+    };
+    localProduct.unit = unitMap[siigoProduct.unit] || "unit";
+
+    // Usar reference como barcode si existe
+    if (siigoProduct.reference) {
+      localProduct.barcode = siigoProduct.reference;
+    } else {
+      localProduct.barcode = siigoProduct.code; // Fallback
+    }
+
+    return localProduct;
+  },
 });

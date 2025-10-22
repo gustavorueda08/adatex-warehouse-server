@@ -1,5 +1,7 @@
 "use strict";
 
+const { siigoFetch } = require("../utils/siigoFetch");
+
 /**
  * Servicio de autenticación con Siigo API
  * Maneja tokens OAuth con cache en memoria
@@ -43,7 +45,7 @@ module.exports = () => ({
       }
 
       // Solicitar nuevo token
-      const response = await fetch(`${apiUrl}/auth`, {
+      const response = await siigoFetch(`${apiUrl}/auth`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -102,6 +104,7 @@ module.exports = () => ({
     return {
       Authorization: token,
       "Content-Type": "application/json",
+      "Partner-Id": process.env.SIIGO_PARTNER_ID,
       ...(process.env.SIIGO_SUBSCRIPTION_KEY && {
         "Ocp-Apim-Subscription-Key": process.env.SIIGO_SUBSCRIPTION_KEY,
       }),
