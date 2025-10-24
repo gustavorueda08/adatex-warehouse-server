@@ -403,6 +403,69 @@ module.exports = ({ strapi }) => ({
   },
 
   /**
+   * Busca un customer en Siigo por número de identificación
+   * @param {String} identification - Número de identificación del customer
+   * @returns {Object|null} - Customer de Siigo o null si no existe
+   */
+  async searchInSiigoByIdentification(identification) {
+    try {
+      console.log(`Buscando customer en Siigo por identification: ${identification}...`);
+
+      const testMode = process.env.SIIGO_TEST_MODE === "true";
+
+      if (testMode) {
+        console.log("[TEST MODE] Simulando búsqueda de customer en Siigo");
+        // Simular que no se encuentra
+        return null;
+      }
+
+      const authService = strapi.service("api::siigo.auth");
+      const headers = await authService.getAuthHeaders();
+      const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+
+      const response = await siigoFetch(
+        `${apiUrl}/v1/customers?identification=${encodeURIComponent(identification)}`,
+        {
+          method: "GET",
+          headers,
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`Customer con identification ${identification} no encontrado en Siigo`);
+          return null;
+        }
+        throw new Error(
+          `Error HTTP ${response.status}: ${response.statusText}`
+        );
+      }
+
+      const data = await response.json();
+      const customers = data.results || data;
+
+      // Si es un array, tomar el primer resultado
+      if (Array.isArray(customers) && customers.length > 0) {
+        console.log(`Customer encontrado en Siigo con ID: ${customers[0].id}`);
+        return customers[0];
+      } else if (!Array.isArray(customers) && customers.id) {
+        console.log(`Customer encontrado en Siigo con ID: ${customers.id}`);
+        return customers;
+      }
+
+      console.log(`Customer con identification ${identification} no encontrado en Siigo`);
+      return null;
+    } catch (error) {
+      console.error(
+        `Error al buscar customer por identification ${identification} en Siigo:`,
+        error.message
+      );
+      // No lanzar error, devolver null para permitir crear el customer
+      return null;
+    }
+  },
+
+  /**
    * Lista todos los customers desde Siigo con paginación
    * @param {Object} options - Opciones de listado (page, pageSize)
    * @returns {Array} - Array de customers de Siigo
