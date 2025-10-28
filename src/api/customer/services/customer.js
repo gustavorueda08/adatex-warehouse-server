@@ -1,19 +1,20 @@
-'use strict';
+"use strict";
 
 /**
  * customer service
  */
 
-const { createCoreService } = require('@strapi/strapi').factories;
+const { createCoreService } = require("@strapi/strapi").factories;
 const ORDER_TYPES = require("../../../utils/orderTypes");
 const ORDER_STATES = require("../../../utils/orderStates");
 const ITEM_STATES = require("../../../utils/itemStates");
 const {
   ORDER_SERVICE,
   ITEM_SERVICE,
+  CUSTOMER_SERVICE,
 } = require("../../../utils/services");
 
-module.exports = createCoreService('api::customer.customer', ({ strapi }) => ({
+module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
   /**
    * Obtiene el balance de inventario en remisión (despachado pero no facturado) para un cliente
    *
@@ -181,7 +182,8 @@ module.exports = createCoreService('api::customer.customer', ({ strapi }) => ({
     const history = [];
 
     for (const order of orders) {
-      const orderType = order.type === ORDER_TYPES.SALE ? "dispatch" : "invoice";
+      const orderType =
+        order.type === ORDER_TYPES.SALE ? "dispatch" : "invoice";
 
       for (const orderProduct of order.orderProducts || []) {
         const product = orderProduct.product;
@@ -199,7 +201,10 @@ module.exports = createCoreService('api::customer.customer', ({ strapi }) => ({
 
         if (quantity > 0) {
           history.push({
-            date: order.actualDispatchDate || order.completedDate || order.createdDate,
+            date:
+              order.actualDispatchDate ||
+              order.completedDate ||
+              order.createdDate,
             type: orderType,
             orderId: order.id,
             orderCode: order.code,
@@ -219,5 +224,16 @@ module.exports = createCoreService('api::customer.customer', ({ strapi }) => ({
     }
 
     return history;
+  },
+  async update(id, data) {},
+  async delete(id) {
+    const deletedCustomer = await strapi.entityService.delete(
+      CUSTOMER_SERVICE,
+      id
+    );
+    if (deletedCustomer) {
+      return deletedCustomer;
+    }
+    throw new Error("Error eliminando el cliente, servicio no disponible");
   },
 }));

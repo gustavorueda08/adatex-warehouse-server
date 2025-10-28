@@ -1,0 +1,39 @@
+{
+  "kind": "collectionType",
+  "collectionName": "territories",
+  "info": {
+    "singularName": "territory",
+    "pluralName": "territories",
+    "displayName": "Territory"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "country": {
+      "type": "string",
+      "default": "Colombia"
+    },
+    "state": {
+      "type": "string",
+      "default": "Valle del Cauca"
+    },
+    "city": {
+      "type": "string",
+      "default": "Cali"
+    },
+    "code": {
+      "type": "uid",
+      "required": true
+    },
+    "stateCode": {
+      "type": "string",
+      "default": "76"
+    },
+    "countryCode": {
+      "type": "string",
+      "default": "Co"
+    }
+  }
+}

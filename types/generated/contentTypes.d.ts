@@ -426,32 +426,6 @@ export interface ApiBarcodeMappingBarcodeMapping
   };
 }
 
-export interface ApiCityCity extends Struct.CollectionTypeSchema {
-  collectionName: 'cities';
-  info: {
-    displayName: 'City';
-    pluralName: 'cities';
-    singularName: 'city';
-  };
-  options: {
-    draftAndPublish: false;
-  };
-  attributes: {
-    createdAt: Schema.Attribute.DateTime;
-    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-    locale: Schema.Attribute.String & Schema.Attribute.Private;
-    localizations: Schema.Attribute.Relation<'oneToMany', 'api::city.city'> &
-      Schema.Attribute.Private;
-    name: Schema.Attribute.String;
-    publishedAt: Schema.Attribute.DateTime;
-    siigoCode: Schema.Attribute.Integer;
-    updatedAt: Schema.Attribute.DateTime;
-    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
-      Schema.Attribute.Private;
-  };
-}
-
 export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
   collectionName: 'customers';
   info: {
@@ -471,6 +445,7 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     creditLimit: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     creditUsed: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     email: Schema.Attribute.String;
+    fiscalCode: Schema.Attribute.String & Schema.Attribute.DefaultTo<'R-99-PN'>;
     identification: Schema.Attribute.UID & Schema.Attribute.Required;
     invoiceOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
@@ -491,8 +466,11 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     phone: Schema.Attribute.String;
     prices: Schema.Attribute.Relation<'oneToMany', 'api::price.price'>;
     publishedAt: Schema.Attribute.DateTime;
+    siigoCityCode: Schema.Attribute.UID;
     siigoId: Schema.Attribute.UID;
     taxes: Schema.Attribute.Relation<'manyToMany', 'api::tax.tax'>;
+    type: Schema.Attribute.Enumeration<['natural', 'legal']> &
+      Schema.Attribute.DefaultTo<'natural'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -973,6 +951,40 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     use: Schema.Attribute.Enumeration<['increment', 'decrement']> &
       Schema.Attribute.DefaultTo<'decrement'>;
+  };
+}
+
+export interface ApiTerritoryTerritory extends Struct.CollectionTypeSchema {
+  collectionName: 'territories';
+  info: {
+    displayName: 'Territory';
+    pluralName: 'territories';
+    singularName: 'territory';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    city: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Cali'>;
+    code: Schema.Attribute.UID & Schema.Attribute.Required;
+    country: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Colombia'>;
+    countryCode: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Co'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::territory.territory'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    state: Schema.Attribute.String &
+      Schema.Attribute.DefaultTo<'Valle del Cauca'>;
+    stateCode: Schema.Attribute.String & Schema.Attribute.DefaultTo<'76'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
   };
 }
 
@@ -1559,7 +1571,6 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::barcode-mapping.barcode-mapping': ApiBarcodeMappingBarcodeMapping;
-      'api::city.city': ApiCityCity;
       'api::customer.customer': ApiCustomerCustomer;
       'api::inventory-movement.inventory-movement': ApiInventoryMovementInventoryMovement;
       'api::item.item': ApiItemItem;
@@ -1569,6 +1580,7 @@ declare module '@strapi/strapi' {
       'api::product.product': ApiProductProduct;
       'api::supplier.supplier': ApiSupplierSupplier;
       'api::tax.tax': ApiTaxTax;
+      'api::territory.territory': ApiTerritoryTerritory;
       'api::warehouse.warehouse': ApiWarehouseWarehouse;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;

@@ -1,9 +1,9 @@
 'use strict';
 
 /**
- * city service
+ * territory service
  */
 
 const { createCoreService } = require('@strapi/strapi').factories;
 
-module.exports = createCoreService('api::city.city');
+module.exports = createCoreService('api::territory.territory');

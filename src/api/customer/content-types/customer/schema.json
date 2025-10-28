@@ -96,6 +96,21 @@
       "relation": "manyToMany",
       "target": "api::tax.tax",
       "inversedBy": "customers"
+    },
+    "siigoCityCode": {
+      "type": "uid"
+    },
+    "type": {
+      "type": "enumeration",
+      "default": "natural",
+      "enum": [
+        "natural",
+        "legal"
+      ]
+    },
+    "fiscalCode": {
+      "type": "string",
+      "default": "R-99-PN"
     }
   }
 }
