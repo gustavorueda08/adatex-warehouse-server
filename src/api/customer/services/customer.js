@@ -15,6 +15,7 @@ const {
   TAX_SERVICE,
 } = require("../../../utils/services");
 const compareRelationArrays = require("../../../utils/compareRelationArrays");
+const detectPriceOperations = require("../../../utils/detectPriceOperations");
 
 module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
   /**
@@ -288,23 +289,27 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
     });
   },
   /**
-   * Actualiza un customer y sus relaciones (taxes y parties)
+   * Actualiza un customer y sus relaciones (taxes, parties y prices)
    *
    * @param {Number} id - ID del customer a actualizar
    * @param {Object} data - Datos a actualizar
    * @param {Array<number>} data.taxes - Array de IDs de taxes
    * @param {Array<number>} data.parties - Array de IDs de parties (customers relacionados)
+   * @param {Array<Object>} data.prices - Array de objetos price con sus datos completos.
+   *   Los prices con 'id' se actualizan, sin 'id' se crean, y los no incluidos se eliminan.
+   *   Ejemplo: [{ id: 'uuid', product: 1, unitPrice: 15000, ivaIncluded: true }, { product: 2, unitPrice: 20000 }]
    * @returns {Object} Customer actualizado con relaciones populadas
    */
   async update(id, data) {
-    const { taxes = [], parties = [], ...rest } = data;
+    const { taxes = [], parties = [], prices = [], ...rest } = data;
+
     return strapi.db.transaction(async (trx) => {
       // Obtener customer actual con relaciones
       const currentCustomer = await strapi.entityService.findOne(
         CUSTOMER_SERVICE,
         id,
         {
-          populate: ["taxes", "parties"],
+          populate: ["taxes", "parties", "prices"],
         },
         { transacting: trx }
       );
@@ -324,6 +329,47 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         currentCustomer.parties?.map((party) => party.id) || [];
       const { toAdd: partiesToAdd, toRemove: partiesToRemove } =
         compareRelationArrays(currentParties, parties);
+
+      // Procesar prices (one-to-many con objetos completos)
+      const currentPrices = currentCustomer.prices || [];
+      const { toCreate, toUpdate, toDelete } = detectPriceOperations(
+        currentPrices,
+        prices
+      );
+
+      // Eliminar prices que ya no están en el array
+      for (const price of toDelete) {
+        await strapi.entityService.delete("api::price.price", price.id, {
+          transacting: trx,
+        });
+      }
+
+      // Actualizar prices existentes con nuevos valores
+      for (const price of toUpdate) {
+        const { id: priceId, ...priceData } = price;
+        await strapi.entityService.update(
+          "api::price.price",
+          priceId,
+          {
+            data: priceData,
+          },
+          { transacting: trx }
+        );
+      }
+
+      // Crear nuevos prices vinculándolos al customer
+      for (const price of toCreate) {
+        await strapi.entityService.create(
+          "api::price.price",
+          {
+            data: {
+              ...price,
+              customer: currentCustomer.id,
+            },
+          },
+          { transacting: trx }
+        );
+      }
 
       // Actualizar el customer con taxes y resto de campos
       await strapi.entityService.update(
@@ -350,7 +396,13 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         CUSTOMER_SERVICE,
         id,
         {
-          populate: ["taxes", "parties", "territory"],
+          populate: [
+            "taxes",
+            "parties",
+            "territory",
+            "prices",
+            "prices.product",
+          ],
         },
         { transacting: trx }
       );

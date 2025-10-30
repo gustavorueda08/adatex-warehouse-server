@@ -19,6 +19,7 @@ module.exports = createCoreController(
       try {
         const { customerId } = ctx.params;
         const { product } = ctx.query;
+        console.log(customerId, "IDDIDIDI");
 
         if (!customerId) {
           throw new Error("El id del cliente es requerido");
