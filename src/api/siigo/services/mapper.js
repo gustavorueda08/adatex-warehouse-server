@@ -85,7 +85,9 @@ module.exports = ({ strapi }) => ({
         seller: process.env.SIIGO_SELLER_ID
           ? parseInt(process.env.SIIGO_SELLER_ID)
           : undefined,
-        observations: order.notes || `Factura generada automáticamente - Orden: ${order.code}`,
+        observations:
+          order.notes ||
+          `Factura generada automáticamente - Orden: ${order.code}`,
         items: items,
         payments: [
           {
@@ -182,7 +184,11 @@ module.exports = ({ strapi }) => ({
       const taxes = [];
 
       // Verificar si el customer tiene taxes configurados
-      if (!customerForInvoice || !customerForInvoice.taxes || customerForInvoice.taxes.length === 0) {
+      if (
+        !customerForInvoice ||
+        !customerForInvoice.taxes ||
+        customerForInvoice.taxes.length === 0
+      ) {
         return taxes;
       }
 
@@ -217,7 +223,12 @@ module.exports = ({ strapi }) => ({
         }
 
         // Si el tax tiene threshold, verificar si se cumple la condición
-        if (shouldApply && tax.treshold && tax.treshold > 0 && tax.tresholdContidion) {
+        if (
+          shouldApply &&
+          tax.treshold &&
+          tax.treshold > 0 &&
+          tax.tresholdContidion
+        ) {
           const itemTotal = orderProduct.price * orderProduct.confirmedQuantity;
 
           switch (tax.tresholdContidion) {
@@ -359,23 +370,24 @@ module.exports = ({ strapi }) => ({
    */
   async mapCustomerToSiigo(customer) {
     // Determinar si es persona o empresa basado en el nombre
-    const isCompany = !customer.name.includes(" ") || customer.name.length > 50;
+    const isCompany = customer.identificationType === "NIT" ? true : false;
 
     const siigoCustomer = {
       type: "Customer",
       person_type: isCompany ? "Company" : "Person",
-      id_type: customer.identificationType || "31", // 31 = NIT por defecto
+      id_type: customer.identificationType === "NIT" ? "31" : "13",
       identification: customer.identification,
-      name: isCompany ? [customer.name] : customer.name.split(" "),
-      active: customer.isActive !== false,
+      name: !isCompany ? [customer.name, customer.lastName] : customer.name,
+      active: customer.isActive,
+      fiscal_responsibilities: [{ code: "R-99-PN" }],
     };
 
     // Agregar contactos si hay email o phone
     if (customer.email || customer.phone) {
       siigoCustomer.contacts = [
         {
-          first_name: customer.name.split(" ")[0] || customer.name,
-          last_name: customer.name.split(" ")[1] || "",
+          first_name: customer.name,
+          last_name: customer.lastName || "",
           email: customer.email || "",
           phone: {
             number: customer.phone || "",
@@ -386,21 +398,23 @@ module.exports = ({ strapi }) => ({
 
     // Agregar dirección si existe
     if (customer.address) {
+      const territory = customer.territory;
+
       siigoCustomer.address = {
         address: customer.address,
         city: {
-          country_code: "Co", // Colombia por defecto
-          state_code: "19", // Código por defecto
-          city_code: customer.cityCode || "001", // Bogotá por defecto
+          country_code: territory?.countryCode || "Co", // Colombia por defecto
+          state_code: territory?.stateCode || "19", // Código por defecto
+          city_code: territory?.code || "76001", // Cali por defecto
         },
-        postal_code: customer.postalCode || "",
+        postal_code: territory?.code || customer?.postalCode || "",
       };
     }
 
-    // Agregar términos de pago si existen
-    if (customer.paymentTerms) {
-      siigoCustomer.payment_terms = {
-        id: customer.paymentTerms,
+    if (customer.seller) {
+      siigoCustomer.related_users = {
+        seller_id: customer.seller.siigoId,
+        collector_id: customer.seller.siigoId,
       };
     }
 

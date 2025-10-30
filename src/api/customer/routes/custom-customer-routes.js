@@ -15,5 +15,15 @@ module.exports = {
       method: "GET",
       handler: "customer.syncFromSiigo",
     },
+    {
+      path: "/customers",
+      method: "POST",
+      handler: "customer.create",
+    },
+    {
+      path: "/customers/:customerId",
+      method: "PUT",
+      handler: "customer.update",
+    },
   ],
 };

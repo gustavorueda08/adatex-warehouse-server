@@ -15,17 +15,18 @@
       "type": "string",
       "required": true
     },
-    "email": {
+    "lastName": {
       "type": "string"
+    },
+    "email": {
+      "type": "string",
+      "required": true
     },
     "phone": {
       "type": "string"
     },
     "address": {
       "type": "text"
-    },
-    "city": {
-      "type": "string"
     },
     "creditLimit": {
       "type": "decimal",
@@ -97,20 +98,28 @@
       "target": "api::tax.tax",
       "inversedBy": "customers"
     },
-    "siigoCityCode": {
-      "type": "uid"
-    },
-    "type": {
+    "identificationType": {
       "type": "enumeration",
-      "default": "natural",
       "enum": [
-        "natural",
-        "legal"
+        "CC",
+        "NIT"
       ]
     },
-    "fiscalCode": {
-      "type": "string",
-      "default": "R-99-PN"
+    "isCompany": {
+      "type": "boolean",
+      "default": false
+    },
+    "territory": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::territory.territory",
+      "inversedBy": "customers"
+    },
+    "seller": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::seller.seller",
+      "inversedBy": "customers"
     }
   }
 }

@@ -438,19 +438,20 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
   };
   attributes: {
     address: Schema.Attribute.Text;
-    city: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     creditLimit: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     creditUsed: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
-    email: Schema.Attribute.String;
-    fiscalCode: Schema.Attribute.String & Schema.Attribute.DefaultTo<'R-99-PN'>;
+    email: Schema.Attribute.String & Schema.Attribute.Required;
     identification: Schema.Attribute.UID & Schema.Attribute.Required;
+    identificationType: Schema.Attribute.Enumeration<['CC', 'NIT']>;
     invoiceOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     isBlocked: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    isCompany: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     isDefault: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    lastName: Schema.Attribute.String;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -466,11 +467,13 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     phone: Schema.Attribute.String;
     prices: Schema.Attribute.Relation<'oneToMany', 'api::price.price'>;
     publishedAt: Schema.Attribute.DateTime;
-    siigoCityCode: Schema.Attribute.UID;
+    seller: Schema.Attribute.Relation<'manyToOne', 'api::seller.seller'>;
     siigoId: Schema.Attribute.UID;
     taxes: Schema.Attribute.Relation<'manyToMany', 'api::tax.tax'>;
-    type: Schema.Attribute.Enumeration<['natural', 'legal']> &
-      Schema.Attribute.DefaultTo<'natural'>;
+    territory: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::territory.territory'
+    >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -870,6 +873,37 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiSellerSeller extends Struct.CollectionTypeSchema {
+  collectionName: 'sellers';
+  info: {
+    displayName: 'Seller';
+    pluralName: 'sellers';
+    singularName: 'seller';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customers: Schema.Attribute.Relation<'oneToMany', 'api::customer.customer'>;
+    identification: Schema.Attribute.UID;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::seller.seller'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    siigoCode: Schema.Attribute.UID;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiSupplierSupplier extends Struct.CollectionTypeSchema {
   collectionName: 'suppliers';
   info: {
@@ -972,6 +1006,7 @@ export interface ApiTerritoryTerritory extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    customers: Schema.Attribute.Relation<'oneToMany', 'api::customer.customer'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1578,6 +1613,7 @@ declare module '@strapi/strapi' {
       'api::order.order': ApiOrderOrder;
       'api::price.price': ApiPricePrice;
       'api::product.product': ApiProductProduct;
+      'api::seller.seller': ApiSellerSeller;
       'api::supplier.supplier': ApiSupplierSupplier;
       'api::tax.tax': ApiTaxTax;
       'api::territory.territory': ApiTerritoryTerritory;

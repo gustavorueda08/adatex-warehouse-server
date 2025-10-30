@@ -34,6 +34,12 @@
     "countryCode": {
       "type": "string",
       "default": "Co"
+    },
+    "customers": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::customer.customer",
+      "mappedBy": "territory"
     }
   }
 }

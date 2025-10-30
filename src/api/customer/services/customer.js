@@ -12,7 +12,9 @@ const {
   ORDER_SERVICE,
   ITEM_SERVICE,
   CUSTOMER_SERVICE,
+  TAX_SERVICE,
 } = require("../../../utils/services");
+const compareRelationArrays = require("../../../utils/compareRelationArrays");
 
 module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
   /**
@@ -225,7 +227,135 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
 
     return history;
   },
-  async update(id, data) {},
+  async create(data) {
+    return strapi.db.transaction(async (trx) => {
+      const { taxes = [], parties = [], ...rest } = data;
+      const customerSiigoService = strapi.service("api::siigo.customer");
+      // Datos del Create
+      const createData = {
+        ...rest,
+      };
+      // Conección de los Taxex
+      if (taxes.length > 0) {
+        createData.taxes = { connect: taxes };
+      } else {
+        // Si no hay taxes, agregamos IVA
+        const taxes = await strapi.entityService.findMany(TAX_SERVICE, {
+          filters: { name: "IVA - 19%" },
+        });
+        const tax = taxes.length > 0 ? taxes[0] : null;
+        if (tax) {
+          createData.taxes = { connect: [tax.id] };
+        }
+      }
+      // Si vienen parties los conectamos
+      if (parties.length > 0) {
+        createData.parties = { connect: parties };
+      }
+      // Creación del Customer
+      const newCustomer = await strapi.entityService.create(
+        CUSTOMER_SERVICE,
+        {
+          data: createData,
+        },
+        { transacting: trx }
+      );
+      // Obtención del Customer en Siigo
+      let siigoCustomer = null;
+      if (newCustomer.identification) {
+        siigoCustomer =
+          await customerSiigoService.searchInSiigoByIdentification(
+            newCustomer.identification
+          );
+      }
+      // Si no hay Customer en Siigo, entonces se crea
+      if (!siigoCustomer) {
+        siigoCustomer = await customerSiigoService.createInSiigo(
+          newCustomer.id
+        );
+      }
+      // Retornamos el customer con el siigoId actualizado
+      return await strapi.entityService.update(
+        CUSTOMER_SERVICE,
+        newCustomer.id,
+        {
+          data: {
+            siigoId: String(siigoCustomer.id) || null,
+          },
+        },
+        { transacting: trx }
+      );
+    });
+  },
+  /**
+   * Actualiza un customer y sus relaciones (taxes y parties)
+   *
+   * @param {Number} id - ID del customer a actualizar
+   * @param {Object} data - Datos a actualizar
+   * @param {Array<number>} data.taxes - Array de IDs de taxes
+   * @param {Array<number>} data.parties - Array de IDs de parties (customers relacionados)
+   * @returns {Object} Customer actualizado con relaciones populadas
+   */
+  async update(id, data) {
+    const { taxes = [], parties = [], ...rest } = data;
+    return strapi.db.transaction(async (trx) => {
+      // Obtener customer actual con relaciones
+      const currentCustomer = await strapi.entityService.findOne(
+        CUSTOMER_SERVICE,
+        id,
+        {
+          populate: ["taxes", "parties"],
+        },
+        { transacting: trx }
+      );
+
+      if (!currentCustomer) {
+        throw new Error(`Customer con ID ${id} no encontrado`);
+      }
+
+      // Procesar taxes (many-to-many)
+      const currentTaxes = currentCustomer.taxes?.map((tax) => tax.id) || [];
+      const { toAdd: taxesToAdd, toRemove: taxesToRemove } =
+        compareRelationArrays(currentTaxes, taxes);
+
+      // Procesar parties (one-to-many)
+      // Las parties que se van a remover necesitan desvincularse del mainParty
+      const currentParties =
+        currentCustomer.parties?.map((party) => party.id) || [];
+      const { toAdd: partiesToAdd, toRemove: partiesToRemove } =
+        compareRelationArrays(currentParties, parties);
+
+      // Actualizar el customer con taxes y resto de campos
+      await strapi.entityService.update(
+        CUSTOMER_SERVICE,
+        id,
+        {
+          data: {
+            ...rest,
+            taxes: {
+              connect: taxesToAdd,
+              disconnect: taxesToRemove,
+            },
+            parties: {
+              connect: partiesToAdd,
+              disconnect: partiesToRemove,
+            },
+          },
+        },
+        { transacting: trx }
+      );
+
+      // Retornar con relaciones populadas
+      return strapi.entityService.findOne(
+        CUSTOMER_SERVICE,
+        id,
+        {
+          populate: ["taxes", "parties", "territory"],
+        },
+        { transacting: trx }
+      );
+    });
+  },
   async delete(id) {
     const deletedCustomer = await strapi.entityService.delete(
       CUSTOMER_SERVICE,

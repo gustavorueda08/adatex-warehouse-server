@@ -6,6 +6,7 @@
 
 const { createCoreController } = require("@strapi/strapi").factories;
 const logger = require("../../../utils/logger");
+const { CUSTOMER_SERVICE } = require("../../../utils/services");
 
 module.exports = createCoreController(
   "api::customer.customer",
@@ -127,6 +128,64 @@ module.exports = createCoreController(
           error: {
             status: 500,
             name: "CustomerSyncError",
+            message: error.message,
+            details: process.env.NODE_ENV !== "production" ? error : undefined,
+          },
+        });
+      }
+    },
+    async create(ctx) {
+      try {
+        const customerService = strapi.service(CUSTOMER_SERVICE);
+        const data = ctx.request.body;
+        if (!data?.data) {
+          throw new Error("Los datos del cliente son requeridos");
+        }
+        const customer = await customerService.create(data.data);
+        if (!customer) {
+          throw new Error("Error al crear el cliente");
+        }
+        return {
+          data: customer,
+          meta: {},
+        };
+      } catch (error) {
+        return ctx.internalServerError(error.message, {
+          error: {
+            status: 500,
+            name: "CustomerCreateError",
+            message: error.message,
+            details: process.env.NODE_ENV !== "production" ? error : undefined,
+          },
+        });
+      }
+    },
+    async update(ctx) {
+      try {
+        const customerService = strapi.service(CUSTOMER_SERVICE);
+        const { customerId } = ctx.params;
+        const data = ctx.request.body;
+        console.log("DATOS", data);
+        if (!customerId) {
+          throw new Error("El id del cliente es requerido");
+        }
+        if (!data?.data) {
+          throw new Error("Los datos del cliente son requeridos");
+        }
+        const customer = await customerService.update(customerId, data.data);
+        if (!customer) {
+          throw new Error("Error al actualizar el cliente");
+        }
+        return {
+          data: customer,
+          meta: {},
+        };
+      } catch (error) {
+        logger.error("Error al actualizar el cliente:", error);
+        return ctx.internalServerError(error.message, {
+          error: {
+            status: 500,
+            name: "CustomerUpdateError",
             message: error.message,
             details: process.env.NODE_ENV !== "production" ? error : undefined,
           },
