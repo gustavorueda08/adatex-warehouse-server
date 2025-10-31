@@ -126,6 +126,12 @@
     },
     "name": {
       "type": "string"
+    },
+    "seller": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::seller.seller",
+      "inversedBy": "user"
     }
   }
 }

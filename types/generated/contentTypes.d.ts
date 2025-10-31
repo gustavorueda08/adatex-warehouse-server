@@ -901,6 +901,10 @@ export interface ApiSellerSeller extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    user: Schema.Attribute.Relation<
+      'oneToOne',
+      'plugin::users-permissions.user'
+    >;
   };
 }
 
@@ -1575,6 +1579,7 @@ export interface PluginUsersPermissionsUser
       'manyToOne',
       'plugin::users-permissions.role'
     >;
+    seller: Schema.Attribute.Relation<'oneToOne', 'api::seller.seller'>;
     type: Schema.Attribute.Enumeration<
       ['admin', 'warehouseKeeper', 'printer', 'seller']
     > &
