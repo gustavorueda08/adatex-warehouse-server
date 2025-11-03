@@ -16,11 +16,6 @@ module.exports = ({ strapi }) => ({
    */
   async createInvoiceForOrder(orderId, options = {}) {
     try {
-      const testMode = process.env.SIIGO_TEST_MODE === "true";
-      console.log(
-        `${testMode ? "[TEST MODE] " : ""}Iniciando creación de factura para Order ID: ${orderId}`
-      );
-
       // Obtener la orden con todos los datos necesarios
       const order = await strapi.entityService.findOne(ORDER_SERVICE, orderId, {
         populate: [
@@ -28,6 +23,8 @@ module.exports = ({ strapi }) => ({
           "customerForInvoice.taxes",
           "orderProducts",
           "orderProducts.product",
+          "customer",
+          "customer.seller",
         ],
       });
 
@@ -35,7 +32,6 @@ module.exports = ({ strapi }) => ({
         throw new Error(`Orden con ID ${orderId} no encontrada`);
       }
 
-      // Validar que la orden sea facturable
       const authService = strapi.service("api::siigo.auth");
       const mapperService = strapi.service("api::siigo.mapper");
 
@@ -54,64 +50,6 @@ module.exports = ({ strapi }) => ({
         JSON.stringify(invoiceData, null, 2)
       );
 
-      // MODO TEST: Simular respuesta sin llamar a Siigo
-      if (testMode) {
-        console.log("[TEST MODE] Simulando creación de factura en Siigo...");
-        const fakeInvoice = {
-          id: "TEST-" + Date.now(),
-          number: `FV-TEST-${order.id}`,
-          date: new Date().toISOString().split("T")[0],
-          total: order.totalAmount,
-          status: "test",
-        };
-
-        // Actualizar orden con el siigoId falso usando db.query
-        await strapi.db.query(ORDER_SERVICE).update({
-          where: { id: orderId },
-          data: {
-            siigoId: String(fakeInvoice.id),
-            invoiceNumber: fakeInvoice.number,
-          },
-        });
-
-        // Marcar items como facturados
-        const orderWithItems = await strapi.entityService.findOne(
-          ORDER_SERVICE,
-          orderId,
-          { populate: ["items"] }
-        );
-
-        const itemIds = orderWithItems.items?.map((i) => i.id) || [];
-        if (itemIds.length > 0) {
-          const { markItemsAsInvoiced } = require("../../order/utils/invoiceHelpers");
-          await markItemsAsInvoiced(itemIds);
-          console.log(
-            `[TEST MODE] ${itemIds.length} items marcados como facturados`
-          );
-        }
-
-        console.log(
-          `[TEST MODE] Factura simulada creada. ID: ${fakeInvoice.id}`
-        );
-
-        return {
-          success: true,
-          testMode: true,
-          order: {
-            id: order.id,
-            code: order.code,
-          },
-          invoice: {
-            siigoId: fakeInvoice.id,
-            number: fakeInvoice.number,
-            date: fakeInvoice.date,
-            total: fakeInvoice.total,
-          },
-          rawResponse: fakeInvoice,
-        };
-      }
-
-      // MODO REAL: Llamar API de Siigo
       const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
@@ -183,7 +121,9 @@ module.exports = ({ strapi }) => ({
 
       const itemIds = orderWithItems.items?.map((i) => i.id) || [];
       if (itemIds.length > 0) {
-        const { markItemsAsInvoiced } = require("../../order/utils/invoiceHelpers");
+        const {
+          markItemsAsInvoiced,
+        } = require("../../order/utils/invoiceHelpers");
         await markItemsAsInvoiced(itemIds);
         console.log(`${itemIds.length} items marcados como facturados`);
       }
@@ -317,7 +257,10 @@ module.exports = ({ strapi }) => ({
           });
           successful++;
         } catch (error) {
-          console.error(`Error al facturar orden ${order.code}:`, error.message);
+          console.error(
+            `Error al facturar orden ${order.code}:`,
+            error.message
+          );
           results.push({
             orderId: order.id,
             orderCode: order.code,
@@ -328,7 +271,9 @@ module.exports = ({ strapi }) => ({
         }
       }
 
-      console.log(`Procesamiento completado. Exitosas: ${successful}, Fallidas: ${failed}`);
+      console.log(
+        `Procesamiento completado. Exitosas: ${successful}, Fallidas: ${failed}`
+      );
 
       return {
         success: true,

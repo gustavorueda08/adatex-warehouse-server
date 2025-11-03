@@ -1,0 +1,27 @@
+{
+  "kind": "singleType",
+  "collectionName": "configurations",
+  "info": {
+    "singularName": "configuration",
+    "pluralName": "configurations",
+    "displayName": "Configuration"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "siigoInvoiceId": {
+      "type": "uid"
+    },
+    "siigoLegalInvoiceId": {
+      "type": "uid"
+    },
+    "siigoPaymentId": {
+      "type": "uid"
+    },
+    "siigoLegalPaymentId": {
+      "type": "uid"
+    }
+  }
+}

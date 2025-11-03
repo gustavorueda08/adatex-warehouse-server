@@ -38,6 +38,7 @@ module.exports = ({ strapi }) => ({
       }
 
       const customer = order.customerForInvoice;
+      const seller = order.customer.seller;
 
       // Validar que el cliente tenga siigoId
       if (!customer.siigoId) {
@@ -49,6 +50,12 @@ module.exports = ({ strapi }) => ({
       if (!customer.identification) {
         throw new Error(
           `El cliente ${customer.name} no tiene número de identificación`
+        );
+      }
+
+      if (!seller && !seller?.siigoCode) {
+        throw new Error(
+          `El vendedor ${seller.name} no tiene número de identificación en siigo`
         );
       }
 

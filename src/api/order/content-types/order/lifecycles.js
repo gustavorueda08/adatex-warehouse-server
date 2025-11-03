@@ -19,9 +19,6 @@ module.exports = {
         // - Para 'partial-invoice': SIEMPRE facturar (es su propósito)
         // - Para 'sale': Solo si emitInvoice === true (venta con factura directa)
         // - Para otros tipos: NO facturar
-        const autoInvoicing =
-          process.env.SIIGO_AUTO_INVOICE_ON_COMPLETE === "true";
-
         const isPartialInvoice = result.type === "partial-invoice";
         const isSaleWithInvoice =
           result.type === "sale" && result.emitInvoice === true;

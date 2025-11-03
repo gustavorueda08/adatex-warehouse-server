@@ -3,10 +3,7 @@
 const ORDER_TYPES = require("../../../utils/orderTypes");
 const ORDER_STATES = require("../../../utils/orderStates");
 const ITEM_STATES = require("../../../utils/itemStates");
-const {
-  ORDER_SERVICE,
-  ITEM_SERVICE,
-} = require("../../../utils/services");
+const { ORDER_SERVICE, ITEM_SERVICE } = require("../../../utils/services");
 
 /**
  * Busca items despachados pero no facturados para un cliente específico
@@ -19,7 +16,12 @@ const {
  * @param {Object} params.options - Opciones adicionales
  * @returns {Array} - Array de items con cantidad a facturar
  */
-async function findInvoiceableItemsByQuantity({ customerId, productId, quantity, options = {} }) {
+async function findInvoiceableItemsByQuantity({
+  customerId,
+  productId,
+  quantity,
+  options = {},
+}) {
   const { trx } = options;
 
   // Buscar todas las órdenes de venta completadas del cliente sin facturar (sin siigoId)
@@ -87,7 +89,10 @@ async function findInvoiceableItemsByQuantity({ customerId, productId, quantity,
       break;
     }
 
-    const quantityToTake = Math.min(itemInfo.availableQuantity, remainingQuantity);
+    const quantityToTake = Math.min(
+      itemInfo.availableQuantity,
+      remainingQuantity
+    );
 
     selectedItems.push({
       item: itemInfo.item,
@@ -120,7 +125,9 @@ async function validatePartialInvoiceOrder(orderData, options = {}) {
 
   // Verificar que tenga parentOrder
   if (!orderData.parentOrder) {
-    errors.push("Las órdenes de tipo partial-invoice deben tener un parentOrder");
+    errors.push(
+      "Las órdenes de tipo partial-invoice deben tener un parentOrder"
+    );
     return { valid: false, errors };
   }
 
@@ -179,7 +186,9 @@ async function validatePartialInvoiceOrder(orderData, options = {}) {
               .find((item) => item.id === itemData.id);
 
             if (!itemInParent) {
-              errors.push(`El item ${itemData.id} no pertenece a la orden padre`);
+              errors.push(
+                `El item ${itemData.id} no pertenece a la orden padre`
+              );
             } else if (itemInParent.isInvoiced) {
               errors.push(
                 `El item ${itemData.id} ya fue facturado previamente`
@@ -351,10 +360,55 @@ async function unmarkItemsAsInvoiced(itemIds, options = {}) {
   );
 }
 
+async function splitOrderForInvoices(order) {
+  const { orderProducts = [] } = order;
+  const splittedOrderProducts = orderProducts.reduce(
+    (acc, orderProduct) => {
+      if (orderProduct.invoicePercentage === 100) {
+        acc.legalOrderProducts.push({
+          ...orderProduct,
+          deliveredQuantity:
+            Math.round(orderProduct.deliveredQuantity * 100) / 100,
+        });
+      } else {
+        const legalOrderProduct = {
+          ...orderProduct,
+          deliveredQuantity:
+            Math.round(
+              orderProduct.deliveredQuantity *
+                (orderProduct.invoicePercentage / 100) *
+                100
+            ) / 100,
+        };
+        const restOrderProduct = {
+          ...orderProduct,
+          deliveredQuantity:
+            Math.round(
+              (orderProduct.deliveredQuantity -
+                legalOrderProduct.deliveredQuantity) *
+                100
+            ) / 100,
+        };
+        acc.legalOrderProducts.push(legalOrderProduct);
+        acc.orderProducts.push(restOrderProduct);
+      }
+    },
+    {
+      legalOrderProducts: [],
+      orderProducts: [],
+    }
+  );
+  return [
+    { ...order, orderProducts: splittedOrderProducts.legalOrderProducts },
+    { ...order, orderProducts: splittedOrderProducts.orderProducts },
+  ];
+}
+
 module.exports = {
   findInvoiceableItemsByQuantity,
   validatePartialInvoiceOrder,
   getInvoiceableItemsFromOrder,
   markItemsAsInvoiced,
   unmarkItemsAsInvoiced,
+  splitOrderForInvoices,
 };

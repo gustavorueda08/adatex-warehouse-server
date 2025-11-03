@@ -426,6 +426,37 @@ export interface ApiBarcodeMappingBarcodeMapping
   };
 }
 
+export interface ApiConfigurationConfiguration extends Struct.SingleTypeSchema {
+  collectionName: 'configurations';
+  info: {
+    displayName: 'Configuration';
+    pluralName: 'configurations';
+    singularName: 'configuration';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::configuration.configuration'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    siigoInvoiceId: Schema.Attribute.UID;
+    siigoLegalInvoiceId: Schema.Attribute.UID;
+    siigoLegalPaymentId: Schema.Attribute.UID;
+    siigoPaymentId: Schema.Attribute.UID;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
   collectionName: 'customers';
   info: {
@@ -1611,6 +1642,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::barcode-mapping.barcode-mapping': ApiBarcodeMappingBarcodeMapping;
+      'api::configuration.configuration': ApiConfigurationConfiguration;
       'api::customer.customer': ApiCustomerCustomer;
       'api::inventory-movement.inventory-movement': ApiInventoryMovementInventoryMovement;
       'api::item.item': ApiItemItem;
