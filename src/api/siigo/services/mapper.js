@@ -10,9 +10,10 @@ module.exports = ({ strapi }) => ({
   /**
    * Mapea una Order de Strapi al formato de factura de Siigo
    * @param {Object} order - Order con populate de orderProducts, customerForInvoice, etc.
+   * @param {Number} documentType - Tipo de documento (1 = tipo A electrónica, 2 = tipo B normal)
    * @returns {Object} - JSON en formato Siigo
    */
-  async mapOrderToInvoice(order) {
+  async mapOrderToInvoice(order, documentType = 1) {
     try {
       // Validaciones iniciales
       if (!order) {
@@ -79,7 +80,7 @@ module.exports = ({ strapi }) => ({
       // Construir objeto de factura en formato Siigo
       const invoice = {
         document: {
-          id: parseInt(process.env.SIIGO_INVOICE_DOCUMENT_ID || 1), // ID del tipo de documento FV
+          id: documentType, // 1 = tipo A (electrónica), 2 = tipo B (normal)
         },
         date: moment().format("YYYY-MM-DD"),
         customer: {
@@ -278,18 +279,19 @@ module.exports = ({ strapi }) => ({
     const errors = [];
 
     // Validar tipo y estado
-    if (order.type !== "sale") {
-      errors.push("La orden debe ser de tipo 'sale'");
+    if (order.type !== "sale" && order.type !== "partial-invoice") {
+      errors.push("La orden debe ser de tipo 'sale' o 'partial-invoice'");
     }
 
     if (order.state !== "completed") {
       errors.push("La orden debe estar en estado 'completed'");
     }
 
-    // Validar que no tenga ya una factura
-    if (order.siigoId) {
+    // Validar que no tenga ya una factura (verificar ambos campos por retrocompatibilidad)
+    if (order.siigoIdTypeA || order.siigoId) {
+      const invoiceId = order.siigoIdTypeA || order.siigoId;
       errors.push(
-        `La orden ya tiene una factura asociada en Siigo (ID: ${order.siigoId})`
+        `La orden ya tiene una factura asociada en Siigo (ID: ${invoiceId})`
       );
     }
 

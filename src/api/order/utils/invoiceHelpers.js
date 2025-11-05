@@ -404,6 +404,56 @@ async function splitOrderForInvoices(order) {
   ];
 }
 
+/**
+ * Divide los orderProducts en dos grupos para facturación dual (Tipo A y Tipo B)
+ * Tipo A (electrónica): contiene el porcentaje especificado de cada producto
+ * Tipo B (normal): contiene el porcentaje restante (solo productos con < 100%)
+ *
+ * @param {Object} order - Orden con orderProducts
+ * @returns {Object} - { needsSplit: boolean, typeAProducts: [], typeBProducts: [] }
+ */
+function splitOrderProductsForDualInvoices(order) {
+  const { orderProducts = [] } = order;
+
+  // Inicializar arrays para ambos tipos de factura
+  const typeAProducts = [];
+  const typeBProducts = [];
+
+  // Procesar cada orderProduct
+  for (const orderProduct of orderProducts) {
+    const invoicePercentage = orderProduct.invoicePercentage || 100;
+    const confirmedQty = orderProduct.confirmedQuantity || 0;
+
+    // Calcular cantidad para factura tipo A (porcentaje especificado)
+    const typeAQuantity = Math.round((confirmedQty * invoicePercentage) / 100 * 100) / 100;
+
+    // Siempre agregar a tipo A (aunque sea con cantidad 0)
+    typeAProducts.push({
+      ...orderProduct,
+      confirmedQuantity: typeAQuantity,
+    });
+
+    // Si el porcentaje es menor a 100%, calcular la cantidad restante para tipo B
+    if (invoicePercentage < 100) {
+      const typeBQuantity = Math.round((confirmedQty - typeAQuantity) * 100) / 100;
+
+      typeBProducts.push({
+        ...orderProduct,
+        confirmedQuantity: typeBQuantity,
+      });
+    }
+  }
+
+  // Determinar si necesita split (hay al menos un producto en tipo B)
+  const needsSplit = typeBProducts.length > 0;
+
+  return {
+    needsSplit,
+    typeAProducts,
+    typeBProducts,
+  };
+}
+
 module.exports = {
   findInvoiceableItemsByQuantity,
   validatePartialInvoiceOrder,
@@ -411,4 +461,5 @@ module.exports = {
   markItemsAsInvoiced,
   unmarkItemsAsInvoiced,
   splitOrderForInvoices,
+  splitOrderProductsForDualInvoices,
 };

@@ -105,6 +105,18 @@
     "invoiceNumber": {
       "type": "uid"
     },
+    "siigoIdTypeA": {
+      "type": "uid"
+    },
+    "invoiceNumberTypeA": {
+      "type": "uid"
+    },
+    "siigoIdTypeB": {
+      "type": "uid"
+    },
+    "invoiceNumberTypeB": {
+      "type": "uid"
+    },
     "trackingNumber": {
       "type": "string"
     },

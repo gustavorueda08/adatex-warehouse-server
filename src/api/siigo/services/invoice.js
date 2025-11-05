@@ -9,10 +9,11 @@ const { siigoFetch } = require("../utils/siigoFetch");
 
 module.exports = ({ strapi }) => ({
   /**
-   * Crea una factura en Siigo para una orden específica
+   * Crea una o dos facturas en Siigo para una orden específica
+   * Genera factura tipo A (electrónica) y opcionalmente tipo B (normal) según invoicePercentage
    * @param {Number} orderId - ID de la orden
    * @param {Object} options - Opciones adicionales
-   * @returns {Object} - Factura creada
+   * @returns {Object} - Factura(s) creada(s)
    */
   async createInvoiceForOrder(orderId, options = {}) {
     try {
@@ -42,77 +43,101 @@ module.exports = ({ strapi }) => ({
         );
       }
 
-      // Mapear orden a formato Siigo
-      const invoiceData = await mapperService.mapOrderToInvoice(order);
+      // Dividir orderProducts en grupos para facturación dual
+      const {
+        splitOrderProductsForDualInvoices,
+      } = require("../../order/utils/invoiceHelpers");
+      const { needsSplit, typeAProducts, typeBProducts } =
+        splitOrderProductsForDualInvoices(order);
 
       console.log(
-        "Datos de factura mapeados:",
-        JSON.stringify(invoiceData, null, 2)
+        `Orden ${order.code} - Necesita split: ${needsSplit ? "SÍ" : "NO"}`
       );
+      console.log(`  - Productos tipo A: ${typeAProducts.length}`);
+      console.log(`  - Productos tipo B: ${typeBProducts.length}`);
 
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+      let invoiceTypeA = null;
+      let invoiceTypeB = null;
 
-      let response;
+      // ========== CREAR FACTURA TIPO A (ELECTRÓNICA) ==========
       try {
-        response = await siigoFetch(`${apiUrl}/v1/invoices`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(invoiceData),
-        });
+        console.log("Creando factura tipo A (electrónica)...");
+        const orderTypeA = { ...order, orderProducts: typeAProducts };
+        const invoiceDataTypeA = await mapperService.mapOrderToInvoice(
+          orderTypeA,
+          1 // documentType = 1 (tipo A)
+        );
 
-        if (!response.ok) {
-          const errorData = await response.text();
-          console.error("Error de Siigo:", errorData);
+        console.log(
+          "Datos factura tipo A:",
+          JSON.stringify(invoiceDataTypeA, null, 2)
+        );
 
-          // Si es error 401, renovar token e intentar de nuevo
-          if (response.status === 401) {
-            console.log("Token expirado, renovando...");
-            authService.invalidateToken();
-            const newHeaders = await authService.getAuthHeaders();
+        invoiceTypeA = await this._sendInvoiceToSiigo(
+          invoiceDataTypeA,
+          apiUrl,
+          authService
+        );
+        console.log(`✓ Factura tipo A creada: ${invoiceTypeA.id}`);
+      } catch (error) {
+        console.error("Error al crear factura tipo A:", error.message);
+        throw new Error(
+          `Error al crear factura tipo A (electrónica): ${error.message}`
+        );
+      }
 
-            response = await siigoFetch(`${apiUrl}/v1/invoices`, {
-              method: "POST",
-              headers: newHeaders,
-              body: JSON.stringify(invoiceData),
-            });
+      // ========== CREAR FACTURA TIPO B (NORMAL) SI ES NECESARIO ==========
+      if (needsSplit) {
+        try {
+          console.log("Creando factura tipo B (normal)...");
+          const orderTypeB = { ...order, orderProducts: typeBProducts };
+          const invoiceDataTypeB = await mapperService.mapOrderToInvoice(
+            orderTypeB,
+            2 // documentType = 2 (tipo B)
+          );
 
-            if (!response.ok) {
-              throw new Error(
-                `Error HTTP ${response.status}: ${response.statusText}`
-              );
-            }
-          } else {
-            throw new Error(
-              `Error HTTP ${response.status}: ${response.statusText}`
-            );
-          }
+          console.log(
+            "Datos factura tipo B:",
+            JSON.stringify(invoiceDataTypeB, null, 2)
+          );
+
+          invoiceTypeB = await this._sendInvoiceToSiigo(
+            invoiceDataTypeB,
+            apiUrl,
+            authService
+          );
+          console.log(`✓ Factura tipo B creada: ${invoiceTypeB.id}`);
+        } catch (error) {
+          console.error("Error al crear factura tipo B:", error.message);
+          // IMPORTANTE: Si falla tipo B, no revertir tipo A
+          // Solo loggear el error y continuar
+          console.warn(
+            "⚠ Factura tipo A fue creada exitosamente, pero tipo B falló. Continuar con precaución."
+          );
         }
-      } catch (fetchError) {
-        console.error("Error al llamar API de Siigo:", fetchError.message);
-        throw fetchError;
       }
 
-      const siigoInvoice = await response.json();
+      // ========== ACTUALIZAR ORDEN CON LOS SIIGO IDS ==========
+      const updateData = {
+        siigoIdTypeA: String(invoiceTypeA.id),
+        invoiceNumberTypeA: invoiceTypeA.number || invoiceTypeA.id,
+        // Mantener retrocompatibilidad con campos antiguos
+        siigoId: String(invoiceTypeA.id),
+        invoiceNumber: invoiceTypeA.number || invoiceTypeA.id,
+      };
 
-      if (!siigoInvoice || !siigoInvoice.id) {
-        throw new Error("Respuesta inválida de Siigo al crear factura");
+      if (invoiceTypeB) {
+        updateData.siigoIdTypeB = String(invoiceTypeB.id);
+        updateData.invoiceNumberTypeB = invoiceTypeB.number || invoiceTypeB.id;
       }
 
-      console.log(
-        `Factura creada exitosamente en Siigo. ID: ${siigoInvoice.id}`
-      );
-
-      // Actualizar orden con el siigoId de la factura usando db.query
       await strapi.db.query(ORDER_SERVICE).update({
         where: { id: orderId },
-        data: {
-          siigoId: String(siigoInvoice.id),
-          invoiceNumber: siigoInvoice.number || siigoInvoice.id,
-        },
+        data: updateData,
       });
 
-      // Marcar items como facturados
+      // ========== MARCAR ITEMS COMO FACTURADOS ==========
       const orderWithItems = await strapi.entityService.findOne(
         ORDER_SERVICE,
         orderId,
@@ -129,9 +154,10 @@ module.exports = ({ strapi }) => ({
       }
 
       console.log(
-        `Order ${order.code} actualizada con siigoId: ${siigoInvoice.id}`
+        `✓ Order ${order.code} actualizada con facturas tipo A${invoiceTypeB ? " y tipo B" : ""}`
       );
 
+      // ========== RETORNAR RESULTADO ==========
       return {
         success: true,
         testMode: false,
@@ -139,13 +165,27 @@ module.exports = ({ strapi }) => ({
           id: order.id,
           code: order.code,
         },
-        invoice: {
-          siigoId: siigoInvoice.id,
-          number: siigoInvoice.number,
-          date: siigoInvoice.date,
-          total: siigoInvoice.total || order.totalAmount,
+        invoiceTypeA: {
+          siigoId: invoiceTypeA.id,
+          number: invoiceTypeA.number,
+          date: invoiceTypeA.date,
+          total: invoiceTypeA.total,
         },
-        rawResponse: siigoInvoice,
+        invoiceTypeB: invoiceTypeB
+          ? {
+              siigoId: invoiceTypeB.id,
+              number: invoiceTypeB.number,
+              date: invoiceTypeB.date,
+              total: invoiceTypeB.total,
+            }
+          : null,
+        // Mantener retrocompatibilidad
+        invoice: {
+          siigoId: invoiceTypeA.id,
+          number: invoiceTypeA.number,
+          date: invoiceTypeA.date,
+          total: invoiceTypeA.total,
+        },
       };
     } catch (error) {
       console.error(
@@ -154,6 +194,58 @@ module.exports = ({ strapi }) => ({
       );
       throw new Error(`Error al crear factura en Siigo: ${error.message}`);
     }
+  },
+
+  /**
+   * Helper interno: Envía una factura a Siigo y maneja reintentos de autenticación
+   * @param {Object} invoiceData - Datos de la factura en formato Siigo
+   * @param {String} apiUrl - URL base de la API de Siigo
+   * @param {Object} authService - Servicio de autenticación
+   * @returns {Object} - Respuesta de Siigo con la factura creada
+   */
+  async _sendInvoiceToSiigo(invoiceData, apiUrl, authService) {
+    const headers = await authService.getAuthHeaders();
+
+    let response = await siigoFetch(`${apiUrl}/v1/invoices`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(invoiceData),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Error de Siigo:", errorData);
+
+      // Si es error 401, renovar token e intentar de nuevo
+      if (response.status === 401) {
+        console.log("Token expirado, renovando...");
+        authService.invalidateToken();
+        const newHeaders = await authService.getAuthHeaders();
+
+        response = await siigoFetch(`${apiUrl}/v1/invoices`, {
+          method: "POST",
+          headers: newHeaders,
+          body: JSON.stringify(invoiceData),
+        });
+
+        if (!response.ok) {
+          const retryError = await response.text();
+          throw new Error(
+            `Error HTTP ${response.status} después de renovar token: ${retryError}`
+          );
+        }
+      } else {
+        throw new Error(`Error HTTP ${response.status}: ${errorData}`);
+      }
+    }
+
+    const siigoInvoice = await response.json();
+
+    if (!siigoInvoice || !siigoInvoice.id) {
+      throw new Error("Respuesta inválida de Siigo al crear factura");
+    }
+
+    return siigoInvoice;
   },
 
   /**

@@ -26,7 +26,8 @@ module.exports = {
         const shouldInvoice =
           (isPartialInvoice || isSaleWithInvoice) &&
           result.customerForInvoice &&
-          !result.siigoId;
+          !result.siigoIdTypeA && // Usar siigoIdTypeA en lugar de siigoId
+          !result.siigoId; // Mantener compatibilidad con órdenes antiguas
 
         if (shouldInvoice) {
           console.log(
@@ -39,9 +40,18 @@ module.exports = {
               result.id
             );
 
-            console.log(
-              `Factura creada automáticamente para Order ${result.code}. Siigo ID: ${invoiceResult.invoice.siigoId}`
-            );
+            // Log de facturas creadas
+            if (invoiceResult.invoiceTypeB) {
+              console.log(
+                `Facturas creadas automáticamente para Order ${result.code}:`
+              );
+              console.log(`  - Tipo A: ${invoiceResult.invoiceTypeA.siigoId}`);
+              console.log(`  - Tipo B: ${invoiceResult.invoiceTypeB.siigoId}`);
+            } else {
+              console.log(
+                `Factura tipo A creada automáticamente para Order ${result.code}. Siigo ID: ${invoiceResult.invoiceTypeA.siigoId}`
+              );
+            }
 
             // Obtener la orden actualizada con todos los datos
             const { ORDER_POPULATE } = require("../../utils/orderHelpers");
@@ -54,11 +64,14 @@ module.exports = {
             // Emitir evento WebSocket con la orden actualizada
             strapi.io?.to(`order:${result.id}`).emit("order:invoice-created", {
               order: updatedOrder,
+              invoiceTypeA: invoiceResult.invoiceTypeA,
+              invoiceTypeB: invoiceResult.invoiceTypeB,
+              // Mantener retrocompatibilidad
               invoice: invoiceResult.invoice,
             });
 
             console.log(
-              `Evento WebSocket emitido para Order ${result.code} con factura creada`
+              `Evento WebSocket emitido para Order ${result.code} con factura(s) creada(s)`
             );
           } catch (error) {
             console.error(
