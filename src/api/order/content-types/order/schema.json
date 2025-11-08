@@ -76,23 +76,6 @@
     "actualWarehouseDate": {
       "type": "date"
     },
-    "subtotal": {
-      "type": "decimal",
-      "default": 0
-    },
-    "taxAmount": {
-      "type": "decimal",
-      "required": false,
-      "default": 0
-    },
-    "shippingAmount": {
-      "type": "decimal",
-      "default": 0
-    },
-    "totalAmount": {
-      "type": "decimal",
-      "default": 0
-    },
     "currency": {
       "type": "enumeration",
       "default": "USD",

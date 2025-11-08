@@ -13,7 +13,7 @@ module.exports = ({ strapi }) => ({
    * @param {Number} documentType - Tipo de documento (1 = tipo A electrónica, 2 = tipo B normal)
    * @returns {Object} - JSON en formato Siigo
    */
-  async mapOrderToInvoice(order, documentType = 1) {
+  async mapOrderToInvoice(order, documentType = 1, paymentTermType = 2810) {
     try {
       // Validaciones iniciales
       if (!order) {
@@ -71,6 +71,73 @@ module.exports = ({ strapi }) => ({
         customer
       );
 
+      // Calcular el subTotal de la factura desde los items
+      let invoiceSubtotal = items.reduce(
+        (acc, item) => acc + item.price * item.quantity,
+        0
+      );
+
+      // Aplicar impuestos a nivel de producto (obtener tasa de impuestos del cliente)
+      const customerTaxRate = this._getCustomerTaxRate(customer);
+      const invoiceTaxes = invoiceSubtotal * customerTaxRate;
+
+      // Calcular retenciones basadas en el subtotal
+      const retentions = this.getSubtotalTaxes(invoiceSubtotal, customer);
+
+      // Calcular el efecto monetario de las retenciones de subtotal
+      let retentionsAmount = 0;
+      if (customer?.taxes?.length > 0) {
+        for (const tax of customer.taxes) {
+          // Solo procesar taxes de tipo "subtotal" que apliquen
+          if (tax.applicationType === "subtotal" && tax.siigoCode) {
+            // Verificar si aplica según threshold
+            let shouldApply = true;
+            if (tax.treshold && tax.treshold > 0 && tax.tresholdContidion) {
+              switch (tax.tresholdContidion) {
+                case "greaterThan":
+                  shouldApply = invoiceSubtotal > tax.treshold;
+                  break;
+                case "lessThan":
+                  shouldApply = invoiceSubtotal < tax.treshold;
+                  break;
+                case "greaterThanOrEqualTo":
+                  shouldApply = invoiceSubtotal >= tax.treshold;
+                  break;
+                case "lessThanOrEqualTo":
+                  shouldApply = invoiceSubtotal <= tax.treshold;
+                  break;
+              }
+            }
+
+            if (shouldApply) {
+              const taxAmount = parseFloat(tax.amount) || 0;
+              const calculatedTax = invoiceSubtotal * taxAmount;
+              // Si es decrement, resta; si es increment, suma
+              if (tax.use === "decrement") {
+                retentionsAmount -= calculatedTax;
+              } else {
+                retentionsAmount += calculatedTax;
+              }
+            }
+          }
+        }
+      }
+
+      // Calcular total final: subtotal + taxes de producto + taxes/retenciones de subtotal
+      const invoiceTotal =
+        Math.round((invoiceSubtotal + invoiceTaxes + retentionsAmount) * 100) /
+        100;
+
+      // Log para debugging
+      console.log("=== Cálculo de factura ===");
+      console.log(`Subtotal (sin IVA): ${invoiceSubtotal}`);
+      console.log(
+        `Tasa de impuesto producto: ${customerTaxRate} (${customerTaxRate * 100}%)`
+      );
+      console.log(`Impuestos producto: ${invoiceTaxes}`);
+      console.log(`Retenciones/Taxes subtotal: ${retentionsAmount}`);
+      console.log(`Total factura: ${invoiceTotal}`);
+
       // Calcular fecha de vencimiento según términos de pago
       const paymentTermsDays = customer.paymentTerms || 0;
       const dueDate = moment()
@@ -85,35 +152,32 @@ module.exports = ({ strapi }) => ({
         date: moment().format("YYYY-MM-DD"),
         customer: {
           identification: customer.identification,
-          branch_office: 0, // Por defecto sucursal 0
         },
         cost_center: process.env.SIIGO_COST_CENTER_ID
           ? parseInt(process.env.SIIGO_COST_CENTER_ID)
           : undefined,
-        seller: process.env.SIIGO_SELLER_ID
-          ? parseInt(process.env.SIIGO_SELLER_ID)
-          : undefined,
+        seller: order.customer.seller.siigoCode,
         observations:
           order.notes ||
           `Factura generada automáticamente - Orden: ${order.code}`,
         items: items,
+        stamp: {
+          send: false,
+        },
         payments: [
           {
-            id: parseInt(process.env.SIIGO_PAYMENT_METHOD_ID || 1), // ID forma de pago
-            value: parseFloat(order.totalAmount),
+            id: paymentTermType, // ID forma de pago
+            value: invoiceTotal, // Usar el total calculado desde los items
             due_date: dueDate,
           },
         ],
       };
 
-      // Agregar currency si está configurado
-      if (order.currency && order.currency !== "COP") {
-        invoice.currency = {
-          code: order.currency,
-          exchange_rate: 1, // Ajustar según necesidad
-        };
+      // Agregar retentions solo si existen
+      if (retentions.length > 0) {
+        invoice.retentions = retentions;
       }
-
+      console.log(invoice);
       return invoice;
     } catch (error) {
       console.error("Error al mapear orden a factura Siigo:", error.message);
@@ -129,56 +193,83 @@ module.exports = ({ strapi }) => ({
    */
   async mapOrderProductsToItems(orderProducts, customerForInvoice) {
     const items = [];
-
     for (const orderProduct of orderProducts) {
       if (!orderProduct.product) {
         throw new Error(
           `OrderProduct ID ${orderProduct.id} no tiene producto asociado`
         );
       }
-
       const product = orderProduct.product;
-
       // Validar que el producto tenga siigoId
       if (!product.siigoId) {
         throw new Error(
           `El producto ${product.name} (Code: ${product.code}) no tiene siigoId. Debe sincronizarse con Siigo primero.`
         );
       }
-
-      // Calcular cantidad a facturar según invoicePercentage
-      const invoicePercentage = orderProduct.invoicePercentage || 100;
-      const quantityToInvoice =
-        (orderProduct.confirmedQuantity * invoicePercentage) / 100;
-
+      // La cantidad ya viene ajustada por invoicePercentage desde splitOrderProductsForDualInvoices
+      const quantityToInvoice = orderProduct.confirmedQuantity || 0;
       if (quantityToInvoice <= 0) {
         continue; // Saltar productos con cantidad 0
       }
-
+      // Calcular precio base (sin IVA si viene incluido)
+      let basePrice = parseFloat(orderProduct.price);
+      const originalPrice = basePrice;
+      // Si el precio incluye IVA, dividir por 1.19 para obtener el precio base
+      if (orderProduct.ivaIncluded === true) {
+        basePrice = basePrice / 1.19;
+        console.log(
+          `Producto ${product.code}: Precio con IVA ${originalPrice} → Precio base ${basePrice}`
+        );
+      }
+      // Redondear a 2 decimales para consistencia
+      basePrice = Math.round(basePrice * 100) / 100;
       // Obtener taxes del producto/cliente
       const taxes = this.getProductTaxes(orderProduct, customerForInvoice);
-
       const item = {
-        code: product.siigoId, // Usar siigoId como código en la factura
-        description: product.name,
-        quantity: parseFloat(quantityToInvoice.toFixed(2)),
-        price: parseFloat(orderProduct.price),
+        code: product.siigoId || product.code, // Usar siigoId como código en la factura
+        quantity: Math.round(quantityToInvoice * 100) / 100, // Redondear a 2 decimales
+        price: basePrice,
         discount: 0, // Agregar lógica de descuento si aplica
       };
-
       // Agregar taxes si existen
       if (taxes.length > 0) {
         item.taxes = taxes;
       }
-
       items.push(item);
     }
-
     if (items.length === 0) {
       throw new Error("No hay items válidos para facturar");
     }
-
     return items;
+  },
+
+  /**
+   * Obtiene la tasa total de impuestos para un cliente
+   * Solo considera taxes a nivel de producto (applicationType: "product")
+   * Distingue entre increment (suma) y decrement (resta)
+   * @param {Object} customer - Customer con taxes
+   * @returns {Number} - Tasa de impuesto total como decimal (e.g., 0.19 para 19% IVA)
+   */
+  _getCustomerTaxRate(customer) {
+    if (!customer || !customer.taxes || customer.taxes.length === 0) {
+      return 0;
+    }
+    // Solo procesar taxes de tipo "product" (los de subtotal se manejan en retentions)
+    const productTaxes = customer.taxes.filter(
+      ({ applicationType }) => applicationType === "product"
+    );
+    let totalRate = 0;
+    for (const tax of productTaxes) {
+      const taxAmount = parseFloat(tax.amount) || 0;
+      // Sumar si es increment (IVA), restar si es decrement (retenciones a nivel de producto)
+      if (tax.use === "decrement") {
+        totalRate -= taxAmount;
+      } else {
+        // Por defecto se suma (increment o sin especificar)
+        totalRate += taxAmount;
+      }
+    }
+    return totalRate;
   },
 
   /**
@@ -210,51 +301,34 @@ module.exports = ({ strapi }) => ({
           continue;
         }
 
+        console.log(tax);
+
         // Verificar si el tax aplica según su applicationType
-        let shouldApply = false;
+        let shouldApply = tax.applicationType === "product";
 
-        switch (tax.applicationType) {
-          case "product":
-            // Se aplica a nivel de producto
-            shouldApply = true;
-            break;
-          case "subtotal":
-            // Se aplica a nivel de subtotal (no va en items, va en el invoice general)
-            shouldApply = false;
-            break;
-          case "auto":
-            // Se aplica automáticamente
-            shouldApply = true;
-            break;
-          default:
-            shouldApply = false;
-        }
-
-        // Si el tax tiene threshold, verificar si se cumple la condición
-        if (
-          shouldApply &&
-          tax.treshold &&
-          tax.treshold > 0 &&
-          tax.tresholdContidion
-        ) {
-          const itemTotal = orderProduct.price * orderProduct.confirmedQuantity;
-
-          switch (tax.tresholdContidion) {
-            case "greaterThan":
-              shouldApply = itemTotal > tax.treshold;
-              break;
-            case "lessThan":
-              shouldApply = itemTotal < tax.treshold;
-              break;
-            case "greaterThanOrEqualTo":
-              shouldApply = itemTotal >= tax.treshold;
-              break;
-            case "lessThanOrEqualTo":
-              shouldApply = itemTotal <= tax.treshold;
-              break;
+        // Si el tax tiene threshold configurado, verificar si se cumple la condición
+        // Los taxes sin threshold (como IVA) se aplican directamente según su applicationType
+        if (shouldApply && tax.treshold && tax.treshold > 0) {
+          // Solo evaluar threshold si también hay una condición definida
+          if (tax.tresholdContidion) {
+            const itemTotal =
+              orderProduct.price * orderProduct.confirmedQuantity;
+            switch (tax.tresholdContidion) {
+              case "greaterThan":
+                shouldApply = itemTotal > tax.treshold;
+                break;
+              case "lessThan":
+                shouldApply = itemTotal < tax.treshold;
+                break;
+              case "greaterThanOrEqualTo":
+                shouldApply = itemTotal >= tax.treshold;
+                break;
+              case "lessThanOrEqualTo":
+                shouldApply = itemTotal <= tax.treshold;
+                break;
+            }
           }
         }
-
         if (shouldApply) {
           // Formato de tax para Siigo: solo necesita el ID
           taxes.push({
@@ -262,10 +336,79 @@ module.exports = ({ strapi }) => ({
           });
         }
       }
-
+      console.log("IMPUESTOS", taxes);
       return taxes;
     } catch (error) {
       console.error("Error al obtener taxes:", error.message);
+      return [];
+    }
+  },
+
+  /**
+   * Obtiene los taxes aplicables al subtotal de la orden (retenciones)
+   * @param {Number} subtotal - Subtotal de la orden (antes de IVA)
+   * @param {Object} customerForInvoice - Customer con taxes
+   * @returns {Array} - Array de taxes en formato Siigo para retentions
+   */
+  getSubtotalTaxes(subtotal, customerForInvoice) {
+    try {
+      const retentions = [];
+
+      // Verificar si el customer tiene taxes configurados
+      if (
+        !customerForInvoice ||
+        !customerForInvoice.taxes ||
+        customerForInvoice.taxes.length === 0
+      ) {
+        return retentions;
+      }
+
+      // Filtrar taxes que aplican a nivel de subtotal
+      for (const tax of customerForInvoice.taxes) {
+        // Validar que el tax tenga siigoCode
+        if (!tax.siigoCode) {
+          console.warn(
+            `Tax "${tax.name}" no tiene siigoCode configurado, se omitirá en retenciones`
+          );
+          continue;
+        }
+
+        // Verificar si el tax aplica según su applicationType (debe ser "subtotal")
+        let shouldApply = tax.applicationType === "subtotal";
+
+        // Si el tax tiene threshold configurado, verificar si se cumple la condición
+        if (shouldApply && tax.treshold && tax.treshold > 0) {
+          // Solo evaluar threshold si también hay una condición definida
+          if (tax.tresholdContidion) {
+            switch (tax.tresholdContidion) {
+              case "greaterThan":
+                shouldApply = subtotal > tax.treshold;
+                break;
+              case "lessThan":
+                shouldApply = subtotal < tax.treshold;
+                break;
+              case "greaterThanOrEqualTo":
+                shouldApply = subtotal >= tax.treshold;
+                break;
+              case "lessThanOrEqualTo":
+                shouldApply = subtotal <= tax.treshold;
+                break;
+            }
+          }
+        }
+
+        if (shouldApply) {
+          // Formato de retention para Siigo: solo necesita el ID
+          retentions.push({
+            id: parseInt(tax.siigoCode),
+          });
+        }
+      }
+
+      console.log("RETENCIONES (subtotal taxes):", retentions);
+      return retentions;
+    } catch (error) {
+      console.error("Error al obtener retenciones:", error.message);
       return [];
     }
   },
@@ -327,9 +470,10 @@ module.exports = ({ strapi }) => ({
     }
 
     // Validar montos
+    /*
     if (!order.totalAmount || order.totalAmount <= 0) {
       errors.push("La orden no tiene un monto total válido");
-    }
+    }*/
 
     return {
       valid: errors.length === 0,

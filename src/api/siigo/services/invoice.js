@@ -66,14 +66,12 @@ module.exports = ({ strapi }) => ({
         const orderTypeA = { ...order, orderProducts: typeAProducts };
         const invoiceDataTypeA = await mapperService.mapOrderToInvoice(
           orderTypeA,
-          1 // documentType = 1 (tipo A)
+          28338
         );
-
         console.log(
           "Datos factura tipo A:",
           JSON.stringify(invoiceDataTypeA, null, 2)
         );
-
         invoiceTypeA = await this._sendInvoiceToSiigo(
           invoiceDataTypeA,
           apiUrl,
@@ -91,10 +89,15 @@ module.exports = ({ strapi }) => ({
       if (needsSplit) {
         try {
           console.log("Creando factura tipo B (normal)...");
-          const orderTypeB = { ...order, orderProducts: typeBProducts };
+          const orderTypeB = {
+            ...order,
+            customerForInvoice: { ...order.customerForInvoice, taxes: [] },
+            orderProducts: typeBProducts,
+          };
           const invoiceDataTypeB = await mapperService.mapOrderToInvoice(
             orderTypeB,
-            2 // documentType = 2 (tipo B)
+            12200,
+            11534
           );
 
           console.log(
@@ -255,19 +258,6 @@ module.exports = ({ strapi }) => ({
    */
   async getInvoice(siigoInvoiceId) {
     try {
-      const testMode = process.env.SIIGO_TEST_MODE === "true";
-
-      if (testMode) {
-        console.log("[TEST MODE] Simulando consulta de factura...");
-        return {
-          id: siigoInvoiceId,
-          number: `FV-TEST-${siigoInvoiceId}`,
-          date: new Date().toISOString().split("T")[0],
-          total: 0,
-          status: "test",
-        };
-      }
-
       const authService = strapi.service("api::siigo.auth");
       const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";

@@ -775,6 +775,8 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
       'plugin::users-permissions.user'
     >;
     invoiceNumber: Schema.Attribute.UID;
+    invoiceNumberTypeA: Schema.Attribute.UID;
+    invoiceNumberTypeB: Schema.Attribute.UID;
     items: Schema.Attribute.Relation<'manyToMany', 'api::item.item'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::order.order'> &
@@ -790,8 +792,9 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     >;
     parentOrder: Schema.Attribute.Relation<'manyToOne', 'api::order.order'>;
     publishedAt: Schema.Attribute.DateTime;
-    shippingAmount: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     siigoId: Schema.Attribute.UID;
+    siigoIdTypeA: Schema.Attribute.UID;
+    siigoIdTypeB: Schema.Attribute.UID;
     sourceItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
     sourceWarehouse: Schema.Attribute.Relation<
       'manyToOne',
@@ -800,10 +803,7 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     state: Schema.Attribute.Enumeration<
       ['draft', 'confirmed', 'processing', 'completed', 'cancelled']
     >;
-    subtotal: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     supplier: Schema.Attribute.Relation<'manyToOne', 'api::supplier.supplier'>;
-    taxAmount: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
-    totalAmount: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     trackingNumber: Schema.Attribute.String;
     transformationFactor: Schema.Attribute.Decimal;
     type: Schema.Attribute.Enumeration<
@@ -992,9 +992,7 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
   };
   attributes: {
     amount: Schema.Attribute.Decimal & Schema.Attribute.Required;
-    applicationType: Schema.Attribute.Enumeration<
-      ['product', 'subtotal', 'auto']
-    > &
+    applicationType: Schema.Attribute.Enumeration<['product', 'subtotal']> &
       Schema.Attribute.DefaultTo<'subtotal'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

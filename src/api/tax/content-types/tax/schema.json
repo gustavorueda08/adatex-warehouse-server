@@ -32,8 +32,7 @@
       "default": "subtotal",
       "enum": [
         "product",
-        "subtotal",
-        "auto"
+        "subtotal"
       ]
     },
     "siigoCode": {
