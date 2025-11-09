@@ -64,6 +64,9 @@
       "relation": "oneToMany",
       "target": "api::price.price",
       "mappedBy": "supplier"
+    },
+    "identification": {
+      "type": "uid"
     }
   }
 }
