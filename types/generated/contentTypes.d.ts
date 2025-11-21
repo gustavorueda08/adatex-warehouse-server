@@ -919,6 +919,7 @@ export interface ApiSellerSeller extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     customers: Schema.Attribute.Relation<'oneToMany', 'api::customer.customer'>;
+    email: Schema.Attribute.Email & Schema.Attribute.Required;
     identification: Schema.Attribute.UID;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<

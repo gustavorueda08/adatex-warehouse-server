@@ -20,6 +20,8 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
         throw new Error("Los datos de la orden son requeridos");
       }
 
+      console.log("DATOS", data.data);
+
       const order = await orderService.create(data.data);
 
       if (!order) {
@@ -59,8 +61,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       }
 
       const { products = [], ...rest } = data.data;
-
-      console.log("RESTO", rest);
 
       const order = await orderService.update({
         products,
@@ -124,8 +124,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       const orderService = strapi.service(ORDER_SERVICE);
       const { orderId } = ctx.params;
       const data = ctx.request.body.data;
-
-      console.log("DATA", data);
 
       if (!orderId) {
         throw new Error("El id de la orden es requerido");

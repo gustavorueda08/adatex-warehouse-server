@@ -32,6 +32,10 @@
       "relation": "oneToOne",
       "target": "plugin::users-permissions.user",
       "mappedBy": "seller"
+    },
+    "email": {
+      "type": "email",
+      "required": true
     }
   }
 }

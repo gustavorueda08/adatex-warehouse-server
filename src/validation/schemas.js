@@ -193,7 +193,9 @@ const CreateOrderSchema = z
                   .transform(String)
                   .optional()
                   .default(null),
-                parentItem: z.object({}).catchall(z.any()).default({}),
+                parentItem: z
+                  .union([z.object({}), z.number(), z.null()])
+                  .default({}),
               })
             )
             .optional()

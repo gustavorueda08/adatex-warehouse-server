@@ -377,7 +377,6 @@ const recalculateOrderProducts = async (
     const { product } = orderProduct;
     const dataFromRequest = products.find((p) => p.product === product.id);
     if (!dataFromRequest) return;
-    console.log(orderProducts, "DATOS DEL REQUEST", products);
 
     const {
       items,

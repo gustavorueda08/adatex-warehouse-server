@@ -455,8 +455,6 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       trx,
     } = searchCriteria;
 
-    console.log(barcode, "BARCODE");
-
     // Estrategia 1: Búsqueda por ID
     if (id) {
       return await strapi.service(ITEM_SERVICE)._findItemById(id, trx);

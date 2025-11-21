@@ -130,8 +130,6 @@ class SaleStrategy extends ItemMovementStrategy {
       justAvailableItems: true, // Solo buscar items disponibles
     };
 
-    console.log(item, "ITEM");
-
     // Determinar cómo buscar el item
     if (item.id) {
       updatePayload.id = item.id;

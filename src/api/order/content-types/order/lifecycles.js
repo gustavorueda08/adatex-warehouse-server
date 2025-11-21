@@ -12,8 +12,12 @@ module.exports = {
     try {
       const { result, params } = event;
 
+      const stateChangedToCompleted =
+        result?.state === "completed" &&
+        (params?.data?.state === "completed" || params?.data?.completedDate);
+
       // Verificar si la orden cambió a estado 'completed'
-      if (result && result.state === "completed") {
+      if (stateChangedToCompleted) {
         // Verificar si debe facturarse automáticamente
         // Lógica:
         // - Para 'partial-invoice': SIEMPRE facturar (es su propósito)
@@ -89,6 +93,10 @@ module.exports = {
             // No lanzamos el error para no afectar el flujo principal del update
           }
         }
+        const packingListNotifier = strapi.service(
+          "api::order.packing-list-notifier"
+        );
+        await packingListNotifier.sendPackingListToSeller(result.id);
       }
     } catch (error) {
       console.error("Error en lifecycle afterUpdate de Order:", error.message);

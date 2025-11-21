@@ -18,7 +18,6 @@ module.exports = {
           timestamp: moment().toDate(),
         },
       };
-      console.log(response);
 
       return response;
     } catch (error) {

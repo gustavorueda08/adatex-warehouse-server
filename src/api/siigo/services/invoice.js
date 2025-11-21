@@ -287,6 +287,54 @@ module.exports = ({ strapi }) => ({
   },
 
   /**
+   * Descarga el PDF de una factura en Siigo
+   * @param {String} siigoInvoiceId - ID de la factura en Siigo
+   * @returns {Buffer} - Contenido del PDF
+   */
+  async downloadInvoicePdf(siigoInvoiceId) {
+    try {
+      const authService = strapi.service("api::siigo.auth");
+      const headers = await authService.getAuthHeaders();
+      const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+
+      const response = await siigoFetch(
+        `${apiUrl}/v1/invoices/${siigoInvoiceId}/pdf`,
+        {
+          method: "GET",
+          headers,
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Error HTTP ${response.status}: ${response.statusText}`
+        );
+      }
+
+      const payload = await response.json();
+      const base64Content = payload?.base64 || payload?.Base64;
+
+      if (!base64Content) {
+        throw new Error("Respuesta de Siigo sin campo base64");
+      }
+
+      const sanitized = base64Content
+        .replace(/^data:application\/pdf;base64,/, "")
+        .replace(/\s+/g, "");
+
+      return Buffer.from(sanitized, "base64");
+    } catch (error) {
+      console.error(
+        `Error al descargar el PDF de la factura ${siigoInvoiceId}:`,
+        error.message
+      );
+      throw new Error(
+        `Error al descargar PDF de factura en Siigo: ${error.message}`
+      );
+    }
+  },
+
+  /**
    * Procesa órdenes completadas pendientes de facturación
    * @returns {Object} - Resumen del procesamiento
    */

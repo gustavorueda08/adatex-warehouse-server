@@ -170,7 +170,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
       try {
         const { id, products = [], update = {} } = data;
         const orderProductService = strapi.service(ORDER_PRODUCT_SERVICE);
-        console.log("update", update);
 
         // Obtención de la orden actual con todos los datos necesarios
         const currentOrder = await strapi.entityService.findOne(
@@ -222,7 +221,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         }
 
         // Actualizar OrderProducts con cantidades finales
-        console.log("PRODUCTS", products);
 
         await recalculateOrderProducts(
           strapi,
