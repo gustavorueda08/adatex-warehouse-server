@@ -62,6 +62,8 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
 
       const { products = [], ...rest } = data.data;
 
+      console.log("DATOS", data.data);
+
       const order = await orderService.update({
         products,
         update: { ...rest },
