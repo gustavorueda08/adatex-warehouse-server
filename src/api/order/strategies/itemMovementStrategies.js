@@ -316,7 +316,6 @@ class OutStrategy extends ItemMovementStrategy {
         "Se requiere id, barcode o quantity+product para buscar el item"
       );
     }
-
     return await this.itemService.update(updatePayload);
   }
 

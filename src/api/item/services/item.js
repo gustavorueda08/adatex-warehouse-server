@@ -265,7 +265,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
    * @returns {Object|null} Datos del movimiento de transferencia o null si no hay cambios
    */
   _processWarehouseChanges(currentItem, updatedItem, orderId, orderProductId) {
-    if (currentItem.warehouse?.id == updatedItem.warehouse?.id) {
+    if (currentItem?.warehouse?.id == updatedItem?.warehouse?.id) {
       return null;
     }
 
@@ -277,8 +277,10 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       orderProduct: orderProductId,
       balanceBefore: updatedItem.currentQuantity,
       balanceAfter: updatedItem.currentQuantity,
-      sourceWarehouse: currentItem.warehouse.id,
-      destinationWarehouse: updatedItem.warehouse.id,
+      sourceWarehouse:
+        currentItem?.warehouse?.id || currentItem?.warehouse || null,
+      destinationWarehouse:
+        updatedItem?.warehouse?.id || updatedItem?.warehouse || null,
       reason: "Transferencia del item entre bodegas",
     };
   },
