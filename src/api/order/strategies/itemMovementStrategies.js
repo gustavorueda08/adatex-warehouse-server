@@ -168,6 +168,10 @@ class SaleStrategy extends ItemMovementStrategy {
       updateData.warehouse = item.warehouse.id;
     }
 
+    if (itemState === ITEM_STATES.SOLD) {
+      updateData.warehouse = null;
+    }
+
     return await this.itemService.update({
       id: item.id,
       update: updateData,
@@ -218,6 +222,7 @@ class ReturnStrategy extends ItemMovementStrategy {
         state: ITEM_STATES.AVAILABLE,
         order: order.id,
         orderProduct: orderProduct.id,
+        warehouse: order.destinationWarehouse.id,
       },
       type: orderType,
       trx,

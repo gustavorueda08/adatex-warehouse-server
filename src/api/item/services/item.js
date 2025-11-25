@@ -338,6 +338,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
             updatedItem.state === ITEM_STATES.SOLD
               ? currentItem.warehouse?.id
               : undefined,
+          warehouse: null,
           reason:
             updatedItem.state === ITEM_STATES.SOLD
               ? updatedItem.isInvoiced
