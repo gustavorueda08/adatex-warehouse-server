@@ -1,5 +1,7 @@
 "use strict";
 
+const { PRODUCT_SERVICE } = require("../../../../utils/services");
+
 /**
  * Lifecycle callbacks para el content-type Product
  * Sincroniza automáticamente con Siigo en cada operación CRUD
@@ -12,34 +14,45 @@ module.exports = {
   async afterCreate(event) {
     try {
       const { result } = event;
+      const productService = strapi.service("api::siigo.product");
 
-      // Verificar si la sincronización automática está habilitada
-      const autoSyncEnabled = process.env.SIIGO_AUTO_SYNC_ENABLED !== "false";
-
-      if (!autoSyncEnabled) {
-        console.log(
-          `[Product ${result.id}] Sincronización automática deshabilitada`
-        );
-        return;
-      }
-
-      // Si ya tiene siigoId, significa que viene de Siigo (sincronización desde Siigo)
-      // No intentar sincronizar de vuelta para evitar loops
+      // Si ya tiene siigoId, significa que ya está sincronizado con Siigo
       if (result.siigoId) {
-        console.log(
-          `[Product ${result.id}] Ya tiene siigoId (${result.siigoId}), viene de Siigo. Se omite sincronización.`
-        );
         return;
       }
 
-      console.log(
-        `[Product ${result.id}] Creado. Iniciando sincronización con Siigo...`
-      );
+      if (!result.code) {
+        console.warn(
+          `[Product ${result.id}] No tiene code, se omite sincronización automática con Siigo`
+        );
+        return;
+      }
 
       // Sincronizar de forma asíncrona sin bloquear (fire-and-forget)
       Promise.resolve().then(async () => {
         try {
-          const productService = strapi.service("api::siigo.product");
+          // Verificar si el product ya existe en Siigo por code
+          const productFromSiigo = await productService.searchInSiigoByCode(
+            result.code
+          );
+          if (productFromSiigo) {
+            console.log(
+              `[Product ${result.id}] Ya existe en Siigo con ID: ${productFromSiigo.id}, actualizando registro local...`
+            );
+
+            await strapi.db.query(PRODUCT_SERVICE).update({
+              where: { id: result.id },
+              data: { siigoId: String(productFromSiigo.id) },
+            });
+            // Traer datos actualizados desde Siigo
+            //await productService.syncFromSiigo(productFromSiigo.id);
+            return;
+          }
+          // Si no existe, crear en Siigo
+          console.log(
+            `[Product ${result.id}] Creado. Iniciando sincronización con Siigo...`
+          );
+
           const syncResult = await productService.createInSiigo(result.id);
 
           console.log(
@@ -60,7 +73,6 @@ module.exports = {
             error.message
           );
 
-          // Opcional: Emitir evento de error por WebSocket
           if (strapi.io) {
             strapi.io.to(`product:${result.id}`).emit("product:siigo-error", {
               productId: result.id,
@@ -82,13 +94,6 @@ module.exports = {
   async afterUpdate(event) {
     try {
       const { result } = event;
-
-      // Verificar si la sincronización automática está habilitada
-      const autoSyncEnabled = process.env.SIIGO_AUTO_SYNC_ENABLED !== "false";
-
-      if (!autoSyncEnabled) {
-        return;
-      }
 
       // Solo sincronizar si el product ya tiene siigoId
       if (!result.siigoId) {
@@ -148,13 +153,6 @@ module.exports = {
   async afterDelete(event) {
     try {
       const { result } = event;
-
-      // Verificar si la sincronización automática está habilitada
-      const autoSyncEnabled = process.env.SIIGO_AUTO_SYNC_ENABLED !== "false";
-
-      if (!autoSyncEnabled) {
-        return;
-      }
 
       // Solo sincronizar si el product tenía siigoId
       if (!result.siigoId) {

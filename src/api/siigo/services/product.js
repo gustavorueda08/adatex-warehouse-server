@@ -89,6 +89,83 @@ module.exports = ({ strapi }) => ({
     }
   },
 
+  async searchInSiigoByCode(code) {
+    try {
+      console.log(`Buscando product en Siigo por code: ${code}...`);
+
+      const testMode = process.env.SIIGO_TEST_MODE === "true";
+
+      if (testMode) {
+        console.log("[TEST MODE] Simulando búsqueda de product en Siigo");
+        return null;
+      }
+
+      const authService = strapi.service("api::siigo.auth");
+      const headers = await authService.getAuthHeaders();
+      const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+
+      let page = 1;
+      const pageSize = 100;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await siigoFetch(
+          `${apiUrl}/v1/products?page=${page}&page_size=${pageSize}`,
+          {
+            method: "GET",
+            headers,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Error HTTP ${response.status}: ${response.statusText}`
+          );
+        }
+
+        const data = await response.json();
+        const products = data.results || data;
+
+        if (Array.isArray(products) && products.length > 0) {
+          const found = products.find(
+            (product) => String(product.code) === String(code)
+          );
+
+          if (found) {
+            console.log(`Product encontrado en Siigo con ID: ${found.id}`);
+            return found;
+          }
+        } else if (products && products.code === code) {
+          console.log(`Product encontrado en Siigo con ID: ${products.id}`);
+          return products;
+        }
+
+        const pagination = data.pagination || {};
+        const totalResults = pagination.total_results;
+        const currentPage = pagination.page || page;
+        const responsePageSize = pagination.page_size || pageSize;
+
+        if (totalResults) {
+          hasMore = currentPage * responsePageSize < totalResults;
+        } else {
+          hasMore =
+            Array.isArray(products) && products.length === responsePageSize;
+        }
+
+        page++;
+      }
+
+      console.log(`Product con code ${code} no encontrado en Siigo`);
+      return null;
+    } catch (error) {
+      console.error(
+        `Error al buscar product por code ${code} en Siigo:`,
+        error.message
+      );
+      return null;
+    }
+  },
+
   /**
    * Envía un product local a Siigo
    * @param {Number} productId - ID del product local
@@ -284,9 +361,7 @@ module.exports = ({ strapi }) => ({
         `Error al actualizar product ${productId} en Siigo:`,
         error.message
       );
-      throw new Error(
-        `Error al actualizar product en Siigo: ${error.message}`
-      );
+      throw new Error(`Error al actualizar product en Siigo: ${error.message}`);
     }
   },
 
@@ -363,9 +438,7 @@ module.exports = ({ strapi }) => ({
         `Error al eliminar product ${productId} en Siigo:`,
         error.message
       );
-      throw new Error(
-        `Error al eliminar product en Siigo: ${error.message}`
-      );
+      throw new Error(`Error al eliminar product en Siigo: ${error.message}`);
     }
   },
 
@@ -430,9 +503,7 @@ module.exports = ({ strapi }) => ({
       return products;
     } catch (error) {
       console.error("Error al listar products desde Siigo:", error.message);
-      throw new Error(
-        `Error al listar products desde Siigo: ${error.message}`
-      );
+      throw new Error(`Error al listar products desde Siigo: ${error.message}`);
     }
   },
 
@@ -442,9 +513,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllFromSiigo() {
     try {
-      console.log(
-        "Iniciando sincronización masiva de products desde Siigo..."
-      );
+      console.log("Iniciando sincronización masiva de products desde Siigo...");
 
       let allProducts = [];
       let page = 1;
@@ -538,9 +607,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllToSiigo() {
     try {
-      console.log(
-        "Iniciando sincronización masiva de products hacia Siigo..."
-      );
+      console.log("Iniciando sincronización masiva de products hacia Siigo...");
 
       const localProducts = await strapi.entityService.findMany(
         PRODUCT_SERVICE,

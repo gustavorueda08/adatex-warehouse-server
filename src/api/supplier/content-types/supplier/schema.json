@@ -15,11 +15,13 @@
       "type": "string",
       "required": true
     },
-    "code": {
-      "type": "uid",
-      "targetField": "name"
+    "lastname": {
+      "type": "string"
     },
     "email": {
+      "type": "string"
+    },
+    "phone": {
       "type": "string"
     },
     "address": {
@@ -28,21 +30,35 @@
     "city": {
       "type": "string"
     },
-    "state": {
-      "type": "string"
-    },
     "country": {
       "type": "string"
     },
-    "postalCode": {
-      "type": "string"
+    "notes": {
+      "type": "text"
     },
     "isActive": {
       "type": "boolean",
       "default": true
     },
-    "notes": {
-      "type": "text"
+    "isCompany": {
+      "type": "boolean",
+      "default": true
+    },
+    "identificationType": {
+      "type": "enumeration",
+      "required": true,
+      "default": "ID",
+      "enum": [
+        "CC",
+        "NIT",
+        "ID"
+      ]
+    },
+    "identification": {
+      "type": "uid"
+    },
+    "siigoId": {
+      "type": "uid"
     },
     "orders": {
       "type": "relation",
@@ -56,17 +72,11 @@
       "target": "api::product.product",
       "mappedBy": "suppliers"
     },
-    "siigoId": {
-      "type": "uid"
-    },
     "prices": {
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::price.price",
       "mappedBy": "supplier"
-    },
-    "identification": {
-      "type": "uid"
     }
   }
 }

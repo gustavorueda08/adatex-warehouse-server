@@ -6,6 +6,7 @@
 
 const { createCoreService } = require("@strapi/strapi").factories;
 
-module.exports = createCoreService("api::supplier.supplier", ({ strapi }) => ({
-  async create(data) {},
-}));
+module.exports = createCoreService(
+  "api::supplier.supplier",
+  ({ strapi }) => ({})
+);

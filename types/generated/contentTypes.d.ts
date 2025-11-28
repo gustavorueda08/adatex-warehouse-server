@@ -953,14 +953,18 @@ export interface ApiSupplierSupplier extends Struct.CollectionTypeSchema {
   attributes: {
     address: Schema.Attribute.Text;
     city: Schema.Attribute.String;
-    code: Schema.Attribute.UID<'name'>;
     country: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     email: Schema.Attribute.String;
     identification: Schema.Attribute.UID;
+    identificationType: Schema.Attribute.Enumeration<['CC', 'NIT', 'ID']> &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<'ID'>;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    isCompany: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    lastname: Schema.Attribute.String;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -970,12 +974,11 @@ export interface ApiSupplierSupplier extends Struct.CollectionTypeSchema {
     name: Schema.Attribute.String & Schema.Attribute.Required;
     notes: Schema.Attribute.Text;
     orders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
-    postalCode: Schema.Attribute.String;
+    phone: Schema.Attribute.String;
     prices: Schema.Attribute.Relation<'oneToMany', 'api::price.price'>;
     products: Schema.Attribute.Relation<'manyToMany', 'api::product.product'>;
     publishedAt: Schema.Attribute.DateTime;
     siigoId: Schema.Attribute.UID;
-    state: Schema.Attribute.String;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
