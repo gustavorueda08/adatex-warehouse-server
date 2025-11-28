@@ -1,6 +1,9 @@
 "use strict";
 
 const moment = require("moment-timezone");
+const formatName = require("../../../utils/formatName");
+const units = require("../../../utils/units");
+const productCategories = require("../../../utils/productCategories");
 
 /**
  * Servicio de mapeo de datos de Strapi a formato Siigo
@@ -580,12 +583,14 @@ module.exports = ({ strapi }) => ({
    * @returns {Object} - Customer en formato local
    */
   async mapSiigoToCustomer(siigoCustomer) {
+    const rawName = Array.isArray(siigoCustomer.name)
+      ? siigoCustomer.name.join(" ")
+      : siigoCustomer.name;
+
     const localCustomer = {
       siigoId: String(siigoCustomer.id),
       identification: siigoCustomer.identification,
-      name: Array.isArray(siigoCustomer.name)
-        ? siigoCustomer.name.join(" ")
-        : siigoCustomer.name,
+      name: formatName(rawName),
       isActive: siigoCustomer.active !== false,
     };
 
@@ -663,12 +668,14 @@ module.exports = ({ strapi }) => ({
    * @returns {Object} - Supplier en formato local
    */
   async mapSiigoToSupplier(siigoSupplier) {
+    const rawName = Array.isArray(siigoSupplier.name)
+      ? siigoSupplier.name.join(" ")
+      : siigoSupplier.name;
+
     const localSupplier = {
       siigoId: String(siigoSupplier.id),
       code: siigoSupplier.identification,
-      name: Array.isArray(siigoSupplier.name)
-        ? siigoSupplier.name.join(" ")
-        : siigoSupplier.name,
+      name: formatName(rawName),
       isActive: siigoSupplier.active !== false,
     };
 
@@ -739,26 +746,17 @@ module.exports = ({ strapi }) => ({
     const localProduct = {
       siigoId: String(siigoProduct.id),
       code: siigoProduct.code,
-      name: siigoProduct.name,
+      name: formatName(siigoProduct.name),
       description: siigoProduct.description || "",
       isActive: siigoProduct.active !== false,
+      barcode: siigoProduct?.additional_fields?.barcode || "",
     };
-
-    // Mapear unidad de medida inversa
-    const unitMap = {
-      Kilogram: "kg",
-      Meter: "m",
-      Unit: "unit",
-    };
-    localProduct.unit = unitMap[siigoProduct.unit] || "unit";
-
-    // Usar reference como barcode si existe
-    if (siigoProduct.reference) {
-      localProduct.barcode = siigoProduct.reference;
-    } else {
-      localProduct.barcode = siigoProduct.code; // Fallback
-    }
-
+    const unit = units.find((u) => u.code == siigoProduct.unit.code);
+    localProduct.unit = unit.value || "unit";
+    const category = productCategories.find(
+      (c) => c.id == siigoProduct?.account_group?.id
+    );
+    localProduct.category = category ? category.value : "Confeccion";
     return localProduct;
   },
 });

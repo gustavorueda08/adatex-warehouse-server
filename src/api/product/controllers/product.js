@@ -43,4 +43,36 @@ module.exports = createCoreController('api::product.product', ({ strapi }) => ({
       });
     }
   },
+
+  /**
+   * Carga masiva de products. Si llega id se actualiza, si no se crea y sincroniza siigoId.
+   * POST /api/products/bulk-upsert
+   */
+  async bulkUpsert(ctx) {
+    try {
+      const { products } = ctx.request.body || {};
+
+      if (!Array.isArray(products)) {
+        return ctx.badRequest("El cuerpo debe incluir 'products' como array");
+      }
+
+      const productService = strapi.service("api::product.product");
+      const result = await productService.bulkUpsert(products);
+
+      return {
+        success: result.success,
+        data: result,
+      };
+    } catch (error) {
+      logger.error("Error en carga masiva de products:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductBulkUpsertError",
+          message: error.message,
+          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+        },
+      });
+    }
+  },
 }));

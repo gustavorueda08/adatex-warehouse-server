@@ -69,6 +69,15 @@
     "barcode": {
       "type": "uid",
       "required": true
+    },
+    "category": {
+      "type": "enumeration",
+      "default": "Confeccion",
+      "enum": [
+        "Confeccion",
+        "Tapiceria",
+        "PrintLab"
+      ]
     }
   }
 }

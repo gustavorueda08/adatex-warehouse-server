@@ -2,8 +2,13 @@ module.exports = {
   routes: [
     {
       path: "/products/sync-from-siigo",
-      method: "POST",
+      method: "GET",
       handler: "product.syncFromSiigo",
+    },
+    {
+      path: "/products/bulk-upsert",
+      method: "POST",
+      handler: "product.bulkUpsert",
     },
   ],
 };

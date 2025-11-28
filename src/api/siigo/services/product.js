@@ -1,6 +1,7 @@
 "use strict";
 
 const { PRODUCT_SERVICE } = require("../../../utils/services");
+const productCategories = require("../../../utils/productCategories");
 const { siigoFetch } = require("../utils/siigoFetch");
 
 /**
@@ -466,6 +467,7 @@ module.exports = ({ strapi }) => ({
             name: "Test Product 1",
             type: "Product",
             active: true,
+            account_group: { id: productCategories[0]?.id },
           },
           {
             id: "TEST-P002",
@@ -473,6 +475,7 @@ module.exports = ({ strapi }) => ({
             name: "Test Product 2",
             type: "Product",
             active: true,
+            account_group: { id: productCategories[1]?.id },
           },
         ];
       }
@@ -515,6 +518,10 @@ module.exports = ({ strapi }) => ({
     try {
       console.log("Iniciando sincronización masiva de products desde Siigo...");
 
+      const allowedCategoryIds = new Set(
+        productCategories.map((category) => String(category.id))
+      );
+
       let allProducts = [];
       let page = 1;
       let hasMore = true;
@@ -554,6 +561,15 @@ module.exports = ({ strapi }) => ({
 
       for (const siigoProduct of allProducts) {
         try {
+          const accountGroupId = siigoProduct?.account_group?.id;
+          if (!allowedCategoryIds.has(String(accountGroupId))) {
+            console.log(
+              `Product ${siigoProduct.id} omitido por account_group.id no permitido (${accountGroupId})`
+            );
+            skipped++;
+            continue;
+          }
+
           const existing = await strapi.entityService.findMany(
             PRODUCT_SERVICE,
             {
@@ -584,8 +600,8 @@ module.exports = ({ strapi }) => ({
         updated,
         skipped,
         failed,
-        total: allProducts.length,
-        message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Fallidos: ${failed}`,
+        total: created + updated + skipped + failed,
+        message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Saltados: ${skipped}, Fallidos: ${failed}`,
       };
 
       console.log(result.message);

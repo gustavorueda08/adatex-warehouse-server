@@ -871,6 +871,10 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
   };
   attributes: {
     barcode: Schema.Attribute.UID & Schema.Attribute.Required;
+    category: Schema.Attribute.Enumeration<
+      ['Confeccion', 'Tapiceria', 'PrintLab']
+    > &
+      Schema.Attribute.DefaultTo<'Confeccion'>;
     code: Schema.Attribute.UID & Schema.Attribute.Required;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
