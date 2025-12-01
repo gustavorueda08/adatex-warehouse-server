@@ -46,11 +46,14 @@ function setItemBarcode({
   // Formatear itemNumber y lotNumber con 4 dígitos (padding con ceros)
   const formattedItemNumber = String(itemNumber).padStart(4, "0");
   const formattedLotNumber = String(lotNumber).padStart(4, "0");
+  const containerSuffix = containerCode
+    ? convertCode(containerCode)
+    : String(Math.floor(1000 + Math.random() * 9000));
 
   if (isVirtual) {
     return `VITRUAL${productCode}${formattedItemNumber}${formattedLotNumber}${dateCode}`;
   }
-  return `${productCode}${formattedItemNumber}${formattedLotNumber}${containerCode ? convertCode(containerCode) : ""}`;
+  return `${productCode}${formattedItemNumber}${formattedLotNumber}${containerSuffix}`;
 }
 
 function generateAlternativeItemBarcode(code, quantity, containerCode) {

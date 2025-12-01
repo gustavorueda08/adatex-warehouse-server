@@ -169,6 +169,15 @@ const updateOrderProducts = async (
     )
     .flat();
 
+  // Cache de orderProducts por producto para reutilizarlos si se crean en esta ejecución
+  const orderProductsByProductId = new Map(
+    currentOrder.orderProducts.map((orderProduct) => [
+      orderProduct.product.id,
+      orderProduct,
+    ])
+  );
+  const pendingOrderProductCreations = new Map();
+
   // Clasificar items
   const { itemsToRemove, itemsToKeep, itemsToAdd } = classifyItems(
     currentItems,
@@ -208,31 +217,44 @@ const updateOrderProducts = async (
       ...item
     } = itemData;
 
-    let product;
-    let orderProduct = currentOrder.orderProducts.find(
-      ({ product }) => product.id == productId
-    );
+    let orderProduct = orderProductsByProductId.get(productId);
+    let product = orderProduct?.product;
 
-    // Si no existe el OrderProduct, crearlo
+    // Si no existe el OrderProduct, crearlo y cachearlo para próximos items del mismo producto
     if (!orderProduct) {
-      product = await strapi.entityService.findOne(PRODUCT_SERVICE, productId, {
-        transacting: trx,
-      });
-
-      if (!product) {
-        throw new Error("El producto no existe");
+      let creationPromise = pendingOrderProductCreations.get(productId);
+      if (!creationPromise) {
+        creationPromise = (async () => {
+          const fetchedProduct = await strapi.entityService.findOne(
+            PRODUCT_SERVICE,
+            productId,
+            {
+              transacting: trx,
+            }
+          );
+          if (!fetchedProduct) {
+            throw new Error("El producto no existe");
+          }
+          const createdOrderProduct = await orderProductService.create({
+            product: fetchedProduct.id,
+            order: currentOrder.id,
+            requestedQuantity: 0,
+            requestedPackages: 0,
+            notes: "Producto agregado en actualización de orden",
+            trx,
+          });
+          const orderProductWithProduct = {
+            ...createdOrderProduct,
+            product: fetchedProduct,
+          };
+          orderProductsByProductId.set(productId, orderProductWithProduct);
+          return orderProductWithProduct;
+        })();
+        pendingOrderProductCreations.set(productId, creationPromise);
       }
-
-      orderProduct = await orderProductService.create({
-        product: product.id,
-        order: currentOrder.id,
-        requestedQuantity: 0,
-        requestedPackages: 0,
-        notes: "Producto agregado en actualización de orden",
-        trx,
-      });
-    } else {
-      product = orderProduct.product;
+      const createdOrderProduct = await creationPromise;
+      orderProduct = createdOrderProduct;
+      product = createdOrderProduct.product;
     }
 
     // Agregar el item
