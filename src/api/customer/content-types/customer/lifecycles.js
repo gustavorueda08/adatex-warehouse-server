@@ -7,27 +7,86 @@ const { TAX_SERVICE, CUSTOMER_SERVICE } = require("../../../../utils/services");
  * Sincroniza automáticamente con Siigo en cada operación CRUD
  */
 
+const formatName = require("../../../../utils/formatName");
+
 module.exports = {
+  async beforeCreate(event) {
+    const { data } = event.params;
+    if (data.name) {
+      data.name = formatName(data.name);
+    }
+    if (data.lastName) {
+      data.lastName = formatName(data.lastName);
+    }
+  },
+
+  async beforeUpdate(event) {
+    const { data } = event.params;
+    if (data.name) {
+      data.name = formatName(data.name);
+    }
+    if (data.lastName) {
+      data.lastName = formatName(data.lastName);
+    }
+  },
+
+  async afterCreate(event) {
+    try {
+      const { result } = event;
+      const customerSiigoService = strapi.service("api::siigo.customer");
+
+      // Si ya tiene siigoId (e.g. creado desde sync), no hacemos nada
+      if (result.siigoId) {
+        return;
+      }
+
+      // Intentar buscar en Siigo por identificación primero
+      if (result.identification) {
+        const existingSiigoCustomer =
+          await customerSiigoService.searchInSiigoByIdentification(
+            result.identification
+          );
+
+        if (existingSiigoCustomer) {
+          // Si existe, actualizamos localmente el siigoId
+          await strapi.db.query(CUSTOMER_SERVICE).update({
+            where: { id: result.id },
+            data: { siigoId: String(existingSiigoCustomer.id) },
+          });
+          console.log(
+            `[Customer Lifecycle] Customer ${result.id} vinculado con Siigo ID ${existingSiigoCustomer.id}`
+          );
+          return;
+        }
+      }
+
+      // Si no existe, lo creamos en Siigo
+      await customerSiigoService.createInSiigo(result.id);
+    } catch (error) {
+      console.error(
+        "[Customer Lifecycle] Error en afterCreate:",
+        error.message
+      );
+    }
+  },
+
   async afterUpdate(event) {
     try {
       const { result } = event;
+      const customerSiigoService = strapi.service("api::siigo.customer");
 
-      // Solo sincronizar si el customer ya tiene siigoId
-      if (!result.siigoId) {
-        console.log(
-          `[Customer ${result.id}] No tiene siigoId, se omite sincronización`
-        );
-        return;
+      // Si tiene siigoId, actualizamos en Siigo
+      if (result.siigoId) {
+        await customerSiigoService.updateInSiigo(result.id);
+      } else {
+        // Si no tiene siigoId, intentamos crearlo
+        await customerSiigoService.createInSiigo(result.id);
       }
-      //const customerSiigoService = strapi.service("api::siigo.customer");
-      //await customerSiigoService.updateInSiigo(result.id);
-      return;
     } catch (error) {
       console.error(
         "[Customer Lifecycle] Error en afterUpdate:",
         error.message
       );
-      // No lanzamos el error para no afectar la actualización del customer
     }
   },
 };

@@ -560,17 +560,17 @@ module.exports = ({ strapi }) => ({
         address: customer.address,
         city: {
           country_code: territory?.countryCode || "Co", // Colombia por defecto
-          state_code: territory?.stateCode || "19", // Código por defecto
+          state_code: territory?.stateCode || "76", // Valle del Cauca por defecto (coincide con 76001)
           city_code: territory?.code || "76001", // Cali por defecto
         },
-        postal_code: territory?.code || customer?.postalCode || "",
+        postal_code: territory?.code || customer?.postalCode || "76001",
       };
     }
 
     if (customer.seller) {
       siigoCustomer.related_users = {
-        seller_id: customer.seller.siigoId,
-        collector_id: customer.seller.siigoId,
+        seller_id: customer.seller.siigoCode,
+        collector_id: customer.seller.siigoCode,
       };
     }
 
@@ -583,18 +583,41 @@ module.exports = ({ strapi }) => ({
    * @returns {Object} - Customer en formato local
    */
   async mapSiigoToCustomer(siigoCustomer) {
-    const rawName = Array.isArray(siigoCustomer.name)
-      ? siigoCustomer.name.join(" ")
-      : siigoCustomer.name;
-
     const localCustomer = {
       siigoId: String(siigoCustomer.id),
       identification: siigoCustomer.identification,
-      name: formatName(rawName),
       isActive: siigoCustomer.active !== false,
     };
 
-    // Extraer email y phone del primer contacto
+    // Name mapping
+    if (Array.isArray(siigoCustomer.name)) {
+      localCustomer.name = formatName(siigoCustomer.name[0]);
+      if (siigoCustomer.name.length > 1) {
+        localCustomer.lastName = formatName(
+          siigoCustomer.name.slice(1).join(" ")
+        );
+      }
+    } else {
+      localCustomer.name = formatName(siigoCustomer.name);
+    }
+
+    // Identification Type
+    // Siigo puede devolver id_type como objeto { code, name } o como string/number
+    const idTypeCode = siigoCustomer.id_type?.code || siigoCustomer.id_type;
+    const idType = String(idTypeCode);
+
+    if (idType === "13") {
+      localCustomer.identificationType = "CC";
+    } else if (idType === "31") {
+      localCustomer.identificationType = "NIT";
+    }
+
+    // Is Company
+    // Siigo devuelve "Person" o "Company" (implícito si es NIT)
+    // El usuario indicó que person_type viene en la respuesta
+    localCustomer.isCompany = siigoCustomer.person_type === "Company";
+
+    // Contacts
     if (siigoCustomer.contacts && siigoCustomer.contacts.length > 0) {
       const contact = siigoCustomer.contacts[0];
       localCustomer.email = contact.email || "";
@@ -603,18 +626,63 @@ module.exports = ({ strapi }) => ({
       }
     }
 
-    // Extraer dirección
+    // Address & Territory
     if (siigoCustomer.address) {
       localCustomer.address = siigoCustomer.address.address || "";
-      if (siigoCustomer.address.city) {
-        localCustomer.cityCode = siigoCustomer.address.city.city_code;
+
+      if (siigoCustomer.address.city && siigoCustomer.address.city.city_code) {
+        const cityCode = siigoCustomer.address.city.city_code;
+        // Buscar territorio por código
+        try {
+          const territories = await strapi.entityService.findMany(
+            "api::territory.territory",
+            {
+              filters: { code: cityCode },
+              limit: 1,
+            }
+          );
+
+          if (territories && territories.length > 0) {
+            localCustomer.territory = territories[0].id;
+          }
+        } catch (error) {
+          console.warn(
+            `No se pudo vincular territorio para código ${cityCode}:`,
+            error.message
+          );
+        }
       }
-      localCustomer.postalCode = siigoCustomer.address.postal_code || "";
+
+      // Mapear postalCode si existe en el modelo (aunque no lo vi en el schema, lo dejo por si acaso o lo quito?)
+      // El schema NO tiene postalCode. Lo quito para evitar errores si strict mode está activo.
     }
 
-    // Extraer términos de pago
+    // Payment Terms
     if (siigoCustomer.payment_terms) {
       localCustomer.paymentTerms = siigoCustomer.payment_terms.days || 0;
+    }
+
+    // Seller
+    if (siigoCustomer.related_users && siigoCustomer.related_users.seller_id) {
+      const sellerId = String(siigoCustomer.related_users.seller_id);
+      try {
+        const sellers = await strapi.entityService.findMany(
+          "api::seller.seller",
+          {
+            filters: { siigoCode: sellerId },
+            limit: 1,
+          }
+        );
+
+        if (sellers && sellers.length > 0) {
+          localCustomer.seller = sellers[0].id;
+        }
+      } catch (error) {
+        console.warn(
+          `No se pudo vincular vendedor para ID ${sellerId}:`,
+          error.message
+        );
+      }
     }
 
     return localCustomer;

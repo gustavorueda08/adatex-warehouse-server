@@ -76,10 +76,12 @@ module.exports = ({ strapi }) => ({
         await mapperService.mapSiigoToCustomer(siigoCustomer);
 
       // Buscar si ya existe localmente usando db.query para evitar disparar lifecycles
-      const existingCustomers = await strapi.db.query(CUSTOMER_SERVICE).findMany({
-        where: { siigoId: String(siigoId) },
-        limit: 1,
-      });
+      const existingCustomers = await strapi.db
+        .query(CUSTOMER_SERVICE)
+        .findMany({
+          where: { siigoId: String(siigoId) },
+          limit: 1,
+        });
 
       let localCustomer;
 
@@ -123,7 +125,7 @@ module.exports = ({ strapi }) => ({
       const customer = await strapi.entityService.findOne(
         CUSTOMER_SERVICE,
         customerId,
-        { populate: ["taxes"] }
+        { populate: ["taxes", "territory", "seller"] }
       );
 
       if (!customer) {
@@ -161,7 +163,7 @@ module.exports = ({ strapi }) => ({
       const customer = await strapi.entityService.findOne(
         CUSTOMER_SERVICE,
         customerId,
-        { populate: ["taxes"] }
+        { populate: ["taxes", "territory", "seller"] }
       );
 
       if (!customer) {
@@ -250,7 +252,7 @@ module.exports = ({ strapi }) => ({
       const customer = await strapi.entityService.findOne(
         CUSTOMER_SERVICE,
         customerId,
-        { populate: ["taxes"] }
+        { populate: ["taxes", "territory", "seller"] }
       );
 
       if (!customer) {
@@ -409,7 +411,9 @@ module.exports = ({ strapi }) => ({
    */
   async searchInSiigoByIdentification(identification) {
     try {
-      console.log(`Buscando customer en Siigo por identification: ${identification}...`);
+      console.log(
+        `Buscando customer en Siigo por identification: ${identification}...`
+      );
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
@@ -433,7 +437,9 @@ module.exports = ({ strapi }) => ({
 
       if (!response.ok) {
         if (response.status === 404) {
-          console.log(`Customer con identification ${identification} no encontrado en Siigo`);
+          console.log(
+            `Customer con identification ${identification} no encontrado en Siigo`
+          );
           return null;
         }
         throw new Error(
@@ -453,7 +459,9 @@ module.exports = ({ strapi }) => ({
         return customers;
       }
 
-      console.log(`Customer con identification ${identification} no encontrado en Siigo`);
+      console.log(
+        `Customer con identification ${identification} no encontrado en Siigo`
+      );
       return null;
     } catch (error) {
       console.error(
@@ -582,6 +590,12 @@ module.exports = ({ strapi }) => ({
 
       for (const siigoCustomer of allCustomers) {
         try {
+          // Filtrar solo los que sean type "Customer"
+          if (siigoCustomer.type !== "Customer") {
+            skipped++;
+            continue;
+          }
+
           await this.syncFromSiigo(siigoCustomer.id);
 
           // Determinar si fue creado o actualizado verificando si existía antes

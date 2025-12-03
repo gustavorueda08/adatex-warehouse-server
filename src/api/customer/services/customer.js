@@ -261,31 +261,8 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         },
         { transacting: trx }
       );
-      // Obtención del Customer en Siigo
-      let siigoCustomer = null;
-      if (newCustomer.identification) {
-        siigoCustomer =
-          await customerSiigoService.searchInSiigoByIdentification(
-            newCustomer.identification
-          );
-      }
-      // Si no hay Customer en Siigo, entonces se crea
-      if (!siigoCustomer) {
-        siigoCustomer = await customerSiigoService.createInSiigo(
-          newCustomer.id
-        );
-      }
-      // Retornamos el customer con el siigoId actualizado
-      return await strapi.entityService.update(
-        CUSTOMER_SERVICE,
-        newCustomer.id,
-        {
-          data: {
-            siigoId: String(siigoCustomer.id) || null,
-          },
-        },
-        { transacting: trx }
-      );
+
+      return newCustomer;
     });
   },
   /**
