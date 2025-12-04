@@ -21,37 +21,81 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
    * @returns {Object} - Resultados paginados con inventario
    */
   async findWithInventory(params = {}) {
-    const { page = 1, pageSize = 25, ...query } = params;
-
-    // 1. Obtener products paginados con relaciones necesarias
-    const products = await strapi.entityService.findMany(SERVICE_UID, {
-      ...query,
-      page,
-      pageSize,
-      populate: {
-        items: {
-          fields: ["currentQuantity", "state"],
-          populate: {
-            warehouse: {
-              fields: ["type"],
-            },
+    // 1. Define required relations for inventory calculation
+    const inventoryPopulate = {
+      items: {
+        fields: ["currentQuantity", "state"],
+        populate: {
+          warehouse: {
+            fields: ["type"],
           },
         },
+      },
+      orderProducts: {
+        fields: ["requestedQuantity", "confirmedQuantity", "state"],
+      },
+    };
+
+    // 2. Normalize user populate params to object format
+    let userPopulate = {};
+    const paramPopulate = params.populate;
+
+    if (paramPopulate) {
+      if (typeof paramPopulate === "string") {
+        if (paramPopulate === "*") {
+          userPopulate = { [paramPopulate]: true };
+        } else {
+          paramPopulate.split(",").forEach((p) => {
+            userPopulate[p.trim()] = true;
+          });
+        }
+      } else if (Array.isArray(paramPopulate)) {
+        paramPopulate.forEach((p) => {
+          if (typeof p === "string") {
+            userPopulate[p] = true;
+          }
+        });
+      } else if (typeof paramPopulate === "object") {
+        userPopulate = paramPopulate;
+      }
+    }
+
+    // 3. Merge user params with inventory requirements
+    // Extract pagination params if they exist in the nested format (Strapi v4 standard)
+    const { pagination: paginationParams, ...otherParams } = params;
+    const { page, pageSize } = paginationParams || {};
+
+    const finalParams = {
+      ...otherParams,
+      // entityService.findPage expects page and pageSize at the root level
+      page: page || params.page,
+      pageSize: pageSize || params.pageSize,
+      // Default sort by name:asc if not provided
+      sort: params.sort || "name:asc",
+      populate: {
+        ...userPopulate,
+        ...inventoryPopulate,
+        items: {
+          ...(userPopulate.items === true ? {} : userPopulate.items || {}),
+          ...inventoryPopulate.items,
+        },
         orderProducts: {
-          fields: ["requestedQuantity", "confirmedQuantity", "state"],
+          ...(userPopulate.orderProducts === true
+            ? {}
+            : userPopulate.orderProducts || {}),
+          ...inventoryPopulate.orderProducts,
         },
       },
-    });
+    };
 
-    // Si es paginación offset/limit, strapi devuelve array directo.
-    // Si es page/pageSize, devuelve array también en findMany de entityService?
-    // EntityService findMany devuelve array. Para paginación necesitamos count.
-    
-    const total = await strapi.entityService.count(SERVICE_UID, query);
-    const pageCount = Math.ceil(total / pageSize);
+    // 4. Fetch data using entityService to handle pagination/filters
+    const { results, pagination } = await strapi.entityService.findPage(
+      SERVICE_UID,
+      finalParams
+    );
 
-    // 2. Calcular inventario para cada product
-    const productsWithInventory = products.map((product) => {
+    // 5. Calculate inventory for each product
+    const productsWithInventory = results.map((product) => {
       const stats = {
         stock: 0,
         production: 0,
@@ -60,47 +104,40 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         reserved: 0,
       };
 
-      // Calcular stock físico por warehouse type
-      if (product.items && product.items.length > 0) {
+      // Calculate physical stock
+      if (product.items?.length > 0) {
         product.items.forEach((item) => {
-          // Solo sumar items disponibles
           if (item.state === "available" && item.warehouse) {
             const qty = Number(item.currentQuantity) || 0;
-            switch (item.warehouse.type) {
-              case "stock":
-                stats.stock += qty;
-                break;
-              case "production":
-                stats.production += qty;
-                break;
-              case "transit":
-                stats.transit += qty;
-                break;
-              case "defective":
-                stats.defective += qty;
-                break;
+            if (stats[item.warehouse.type] !== undefined) {
+              stats[item.warehouse.type] += qty;
             }
           }
         });
       }
 
-      // Calcular reservas (OrderProducts pendientes)
-      if (product.orderProducts && product.orderProducts.length > 0) {
+      // Calculate reserved stock (pending orders)
+      if (product.orderProducts?.length > 0) {
         product.orderProducts.forEach((op) => {
           if (op.state === "pending") {
             const requested = Number(op.requestedQuantity) || 0;
             const confirmed = Number(op.confirmedQuantity) || 0;
-            // Lo que falta por confirmar se considera reserva/demanda pendiente
             stats.reserved += Math.max(0, requested - confirmed);
           }
         });
       }
 
-      // Calcular disponible real
       stats.available = Math.max(0, stats.stock - stats.reserved);
 
-      // Limpiar relaciones pesadas para la respuesta
-      const { items, orderProducts, ...productData } = product;
+      // 6. Cleanup: Remove inventory relations if not requested by user
+      const userAskedForItems = userPopulate.items || userPopulate["*"];
+      const userAskedForOrderProducts =
+        userPopulate.orderProducts || userPopulate["*"];
+
+      const productData = { ...product };
+
+      if (!userAskedForItems) delete productData.items;
+      if (!userAskedForOrderProducts) delete productData.orderProducts;
 
       return {
         ...productData,
@@ -111,12 +148,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     return {
       data: productsWithInventory,
       meta: {
-        pagination: {
-          page: Number(page),
-          pageSize: Number(pageSize),
-          pageCount,
-          total,
-        },
+        pagination,
       },
     };
   },
