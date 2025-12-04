@@ -48,6 +48,29 @@ module.exports = createCoreController('api::product.product', ({ strapi }) => ({
    * Carga masiva de products. Si llega id se actualiza, si no se crea y sincroniza siigoId.
    * POST /api/products/bulk-upsert
    */
+  /**
+   * Obtiene products con inventario calculado
+   * GET /api/products/inventory
+   */
+  async findWithInventory(ctx) {
+    try {
+      const productService = strapi.service("api::product.product");
+      const result = await productService.findWithInventory(ctx.query);
+
+      return result;
+    } catch (error) {
+      logger.error("Error al obtener inventario de products:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductInventoryError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
   async bulkUpsert(ctx) {
     try {
       const { products } = ctx.request.body || {};

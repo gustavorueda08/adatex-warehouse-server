@@ -18,6 +18,13 @@ module.exports = ({ strapi }) => ({
     try {
       console.log(`Sincronizando product ${siigoId} desde Siigo...`);
 
+      // Marcar en el contexto que estamos sincronizando desde Siigo para evitar bucles en lifecycles
+      const ctx = strapi.requestContext.get();
+      if (ctx) {
+        ctx.state = ctx.state || {};
+        ctx.state.isSyncingFromSiigo = true;
+      }
+
       const testMode = process.env.SIIGO_TEST_MODE === "true";
       let siigoProduct;
 

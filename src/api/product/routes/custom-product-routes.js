@@ -10,5 +10,14 @@ module.exports = {
       method: "POST",
       handler: "product.bulkUpsert",
     },
+    {
+      method: "GET",
+      path: "/products/inventory",
+      handler: "product.findWithInventory",
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
   ],
 };

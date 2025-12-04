@@ -781,13 +781,10 @@ module.exports = ({ strapi }) => ({
     };
 
     // Mapear unidad de medida
-    const unitMap = {
-      kg: "Kilogram",
-      m: "Meter",
-      unit: "Unit",
-      piece: "Unit",
-    };
-    siigoProduct.unit = unitMap[product.unit] || "Unit";
+    // Mapear unidad de medida
+    const unitObj = units.find((u) => u.value === product.unit);
+    // Si no encuentra, usa "94" (Unidad) por defecto. Se envía como string (código).
+    siigoProduct.unit = unitObj ? unitObj.code : "94";
 
     // Agregar barcode como reference
     if (product.barcode) {
@@ -795,9 +792,12 @@ module.exports = ({ strapi }) => ({
     }
 
     // Agregar account_group (requerido por Siigo)
-    siigoProduct.account_group = parseInt(
-      process.env.SIIGO_PRODUCT_ACCOUNT_GROUP || "1"
+    const categoryObj = productCategories.find(
+      (c) => c.value === product.category
     );
+    siigoProduct.account_group = categoryObj
+      ? categoryObj.id
+      : 625; // 625 = Confección (default)
 
     // Clasificación fiscal (por defecto gravado)
     siigoProduct.tax_classification = "Taxed";
@@ -819,8 +819,9 @@ module.exports = ({ strapi }) => ({
       isActive: siigoProduct.active !== false,
       barcode: siigoProduct?.additional_fields?.barcode || "",
     };
-    const unit = units.find((u) => u.code == siigoProduct.unit.code);
-    localProduct.unit = unit.value || "unit";
+    const unitCode = siigoProduct.unit?.code || siigoProduct.unit;
+    const unit = units.find((u) => u.code == unitCode);
+    localProduct.unit = unit ? unit.value : "unit";
     const category = productCategories.find(
       (c) => c.id == siigoProduct?.account_group?.id
     );
