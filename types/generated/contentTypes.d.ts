@@ -434,7 +434,7 @@ export interface ApiCollectionCollection extends Struct.CollectionTypeSchema {
     singularName: 'collection';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     createdAt: Schema.Attribute.DateTime;

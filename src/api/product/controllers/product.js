@@ -1,13 +1,13 @@
-'use strict';
+"use strict";
 
 /**
  * product controller
  */
 
-const { createCoreController } = require('@strapi/strapi').factories;
+const { createCoreController } = require("@strapi/strapi").factories;
 const logger = require("../../../utils/logger");
 
-module.exports = createCoreController('api::product.product', ({ strapi }) => ({
+module.exports = createCoreController("api::product.product", ({ strapi }) => ({
   /**
    * Sincroniza todos los products desde Siigo a la base de datos local
    * POST /api/products/sync-from-siigo
@@ -38,7 +38,7 @@ module.exports = createCoreController('api::product.product', ({ strapi }) => ({
           status: 500,
           name: "ProductSyncError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }
@@ -71,6 +71,30 @@ module.exports = createCoreController('api::product.product', ({ strapi }) => ({
     }
   },
 
+  /**
+   * Obtiene TODOS los products con inventario, opcionalmente filtrados por colección
+   * GET /api/products/inventory/all
+   */
+  async findInventoryAll(ctx) {
+    try {
+      const { collection } = ctx.query;
+      const productService = strapi.service("api::product.product");
+      const result = await productService.findInventoryAll({ collection });
+
+      return result;
+    } catch (error) {
+      logger.error("Error al obtener inventario total de products:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductInventoryAllError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
   async bulkUpsert(ctx) {
     try {
       const { products } = ctx.request.body || {};
@@ -93,7 +117,7 @@ module.exports = createCoreController('api::product.product', ({ strapi }) => ({
           status: 500,
           name: "ProductBulkUpsertError",
           message: error.message,
-          details: process.env.NODE_ENV !== 'production' ? error : undefined,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
     }

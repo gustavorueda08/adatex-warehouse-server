@@ -20,95 +20,13 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
    * @param {Object} params - Query params de Strapi
    * @returns {Object} - Resultados paginados con inventario
    */
-  async findWithInventory(params = {}) {
-    // 1. Define required relations for inventory calculation
-    const inventoryPopulate = {
-      items: {
-        fields: ["currentQuantity", "state"],
-        populate: {
-          warehouse: {
-            fields: ["type"],
-          },
-        },
-      },
-      orderProducts: {
-        fields: ["requestedQuantity", "state"],
-        populate: {
-          items: {
-            fields: ["id"],
-          },
-          order: {
-            fields: ["type"],
-            populate: {
-              destinationWarehouse: {
-                fields: ["type"],
-              },
-            },
-          },
-        },
-      },
-    };
-
-    // 2. Normalize user populate params to object format
-    let userPopulate = {};
-    const paramPopulate = params.populate;
-
-    if (paramPopulate) {
-      if (typeof paramPopulate === "string") {
-        if (paramPopulate === "*") {
-          userPopulate = { [paramPopulate]: true };
-        } else {
-          paramPopulate.split(",").forEach((p) => {
-            userPopulate[p.trim()] = true;
-          });
-        }
-      } else if (Array.isArray(paramPopulate)) {
-        paramPopulate.forEach((p) => {
-          if (typeof p === "string") {
-            userPopulate[p] = true;
-          }
-        });
-      } else if (typeof paramPopulate === "object") {
-        userPopulate = paramPopulate;
-      }
-    }
-
-    // 3. Merge user params with inventory requirements
-    // Extract pagination params if they exist in the nested format (Strapi v4 standard)
-    const { pagination: paginationParams, ...otherParams } = params;
-    const { page, pageSize } = paginationParams || {};
-
-    const finalParams = {
-      ...otherParams,
-      // entityService.findPage expects page and pageSize at the root level
-      page: page || params.page,
-      pageSize: pageSize || params.pageSize,
-      // Default sort by name:asc if not provided
-      sort: params.sort || "name:asc",
-      populate: {
-        ...userPopulate,
-        ...inventoryPopulate,
-        items: {
-          ...(userPopulate.items === true ? {} : userPopulate.items || {}),
-          ...inventoryPopulate.items,
-        },
-        orderProducts: {
-          ...(userPopulate.orderProducts === true
-            ? {}
-            : userPopulate.orderProducts || {}),
-          ...inventoryPopulate.orderProducts,
-        },
-      },
-    };
-
-    // 4. Fetch data using entityService to handle pagination/filters
-    const { results, pagination } = await strapi.entityService.findPage(
-      SERVICE_UID,
-      finalParams
-    );
-
-    // 5. Calculate inventory for each product
-    const productsWithInventory = results.map((product) => {
+  /**
+   * Helper to calculate inventory for a list of products
+   * @param {Array} products
+   * @returns {Array} products with inventory
+   */
+  calculateInventoryForProducts(products, userPopulate = {}) {
+    return products.map((product) => {
       const stats = {
         stock: 0,
         production: 0,
@@ -176,7 +94,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stats.reserved -
         stats.required;
 
-      // 6. Cleanup: Remove inventory relations if not requested by user
+      // Cleanup: Remove inventory relations if not requested by user
       const userAskedForItems = userPopulate.items || userPopulate["*"];
       const userAskedForOrderProducts =
         userPopulate.orderProducts || userPopulate["*"];
@@ -191,6 +109,122 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         inventory: stats,
       };
     });
+  },
+
+  /**
+   * Obtiene products con inventario calculado
+   * @param {Object} params - Query params de Strapi
+   * @returns {Object} - Resultados paginados con inventario
+   */
+  async findWithInventory(params = {}) {
+    // 1. Define required relations for inventory calculation
+    const inventoryPopulate = {
+      items: {
+        fields: ["currentQuantity", "state"],
+        populate: {
+          warehouse: {
+            fields: ["type"],
+          },
+        },
+      },
+      orderProducts: {
+        fields: ["requestedQuantity", "state"],
+        populate: {
+          items: {
+            fields: ["id"],
+          },
+          order: {
+            fields: ["type"],
+            populate: {
+              destinationWarehouse: {
+                fields: ["type"],
+              },
+            },
+          },
+        },
+      },
+    };
+
+    // 2. Normalize user populate params to object format
+    let userPopulate = {};
+    const paramPopulate = params.populate;
+
+    if (paramPopulate) {
+      if (typeof paramPopulate === "string") {
+        if (paramPopulate === "*") {
+          userPopulate = { [paramPopulate]: true };
+        } else {
+          paramPopulate.split(",").forEach((p) => {
+            userPopulate[p.trim()] = true;
+          });
+        }
+      } else if (Array.isArray(paramPopulate)) {
+        paramPopulate.forEach((p) => {
+          if (typeof p === "string") {
+            userPopulate[p] = true;
+          }
+        });
+      } else if (typeof paramPopulate === "object") {
+        userPopulate = paramPopulate;
+      }
+    }
+
+    // 3. Merge user params with inventory requirements
+    // Extract pagination params if they exist in the nested format (Strapi v4 standard)
+    // Also extract 'collections' if present to handle custom filtering
+    const {
+      pagination: paginationParams,
+      collections,
+      ...otherParams
+    } = params;
+    const { page, pageSize } = paginationParams || {};
+
+    const finalParams = {
+      ...otherParams,
+      // entityService.findPage expects page and pageSize at the root level
+      page: page || params.page,
+      pageSize: pageSize || params.pageSize,
+      // Default sort by name:asc if not provided
+      sort: params.sort || "name:asc",
+      populate: {
+        ...userPopulate,
+        ...inventoryPopulate,
+        items: {
+          ...(userPopulate.items === true ? {} : userPopulate.items || {}),
+          ...inventoryPopulate.items,
+        },
+        orderProducts: {
+          ...(userPopulate.orderProducts === true
+            ? {}
+            : userPopulate.orderProducts || {}),
+          ...inventoryPopulate.orderProducts,
+        },
+      },
+    };
+
+    // Handle custom 'collections' filter
+    if (collections) {
+      finalParams.filters = {
+        ...(finalParams.filters || {}),
+        collections: {
+          id: {
+            $in: Array.isArray(collections) ? collections : [collections],
+          },
+        },
+      };
+    }
+
+    // 4. Fetch data using entityService to handle pagination/filters
+    const { results, pagination } = await strapi.entityService.findPage(
+      SERVICE_UID,
+      finalParams
+    );
+
+    // 5. Calculate inventory using helper
+    const productsWithInventory = this.calculateInventoryForProducts(
+      results,
+      userPopulate
+    );
 
     return {
       data: productsWithInventory,
@@ -198,6 +232,72 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         pagination,
       },
     };
+  },
+
+  /**
+   * Obtiene TODOS los productos con inventario, opcionalmente filtrados por colección
+   * @param {Object} params - { collection: id }
+   * @returns {Array} - Array de productos con inventario
+   */
+  async findInventoryAll(params = {}) {
+    const { collection } = params;
+
+    // 1. Define required relations for inventory calculation
+    const inventoryPopulate = {
+      items: {
+        fields: ["currentQuantity", "state"],
+        populate: {
+          warehouse: {
+            fields: ["type"],
+          },
+        },
+      },
+      orderProducts: {
+        fields: ["requestedQuantity", "state"],
+        populate: {
+          items: {
+            fields: ["id"],
+          },
+          order: {
+            fields: ["type"],
+            populate: {
+              destinationWarehouse: {
+                fields: ["type"],
+              },
+            },
+          },
+        },
+      },
+    };
+
+    // 2. Build query
+    const query = {
+      populate: inventoryPopulate,
+      sort: "name:asc", // Default sort
+    };
+
+    if (collection) {
+      query.filters = {
+        collections: {
+          id: collection,
+        },
+      };
+    }
+
+    // 3. Fetch all data
+    const results = await strapi.entityService.findMany(SERVICE_UID, query);
+
+    // 4. Calculate inventory
+    // We pass empty userPopulate because for this specific endpoint we only care about inventory
+    // and we don't support dynamic populate from client for simplicity/performance in this "all" endpoint
+    // unless requested, but requirements said "just return array of products with inventory".
+    // So we will strip items/orderProducts by default to keep response clean.
+    const productsWithInventory = this.calculateInventoryForProducts(
+      results,
+      {}
+    );
+
+    return productsWithInventory;
   },
 
   async bulkUpsert(products = []) {

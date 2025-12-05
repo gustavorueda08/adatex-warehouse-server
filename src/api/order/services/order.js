@@ -29,7 +29,7 @@ const {
   generateOrderNumber,
   updateOrderProducts,
   updateExistingOrderProducts,
-  recalculateOrderProducts,
+  syncOrderProducts,
   ORDER_POPULATE,
   ORDER_POPULATE_BASIC,
 } = require("../utils/orderHelpers");
@@ -199,8 +199,8 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         // Obtener el nuevo estado del Order si llega, o tomar el estado actual
         const orderState = update?.state || currentOrder.state;
 
-        // Si vienen productos para actualizar
-        if (products.length > 0) {
+        // Si vienen productos para actualizar (incluso array vacío)
+        if (data.products) {
           await updateOrderProducts(
             strapi,
             currentOrder,
@@ -210,26 +210,18 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             trx
           );
         }
-        // Si no vienen productos pero hay productos existentes, actualizar sus estados
-        else if (currentOrder.orderProducts.length > 0) {
-          await updateExistingOrderProducts(
+
+        // Sincronizar OrderProducts (actualizar y eliminar huérfanos)
+        if (data.products) {
+          await syncOrderProducts(
             strapi,
-            currentOrder,
+            currentOrder.id,
+            products,
             orderState,
+            orderProductService,
             trx
           );
         }
-
-        // Actualizar OrderProducts con cantidades finales
-
-        await recalculateOrderProducts(
-          strapi,
-          currentOrder.id,
-          products,
-          orderState,
-          orderProductService,
-          trx
-        );
 
         // Actualizar y retornar la orden completa
         const updatedOrder = await strapi.entityService.update(

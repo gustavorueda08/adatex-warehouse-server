@@ -19,5 +19,14 @@ module.exports = {
         middlewares: [],
       },
     },
+    {
+      method: "GET",
+      path: "/products/inventory/all",
+      handler: "product.findInventoryAll",
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
   ],
 };

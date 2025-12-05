@@ -164,7 +164,7 @@ const updateOrderProducts = async (
         ...item,
         product,
         ivaIncluded,
-        price,
+        price: parseFloat(price) || 0,
       }))
     )
     .flat();
@@ -177,6 +177,46 @@ const updateOrderProducts = async (
     ])
   );
   const pendingOrderProductCreations = new Map();
+
+  // Asegurar que existan OrderProducts para todos los productos solicitados
+  // Esto cubre el caso donde se envía un producto sin items (items: [])
+  await runInBatches(products, async (productData) => {
+    const productId = productData.product;
+    let orderProduct = orderProductsByProductId.get(productId);
+
+    if (!orderProduct) {
+      const fetchedProduct = await strapi.entityService.findOne(
+        PRODUCT_SERVICE,
+        productId,
+        { transacting: trx }
+      );
+
+      if (!fetchedProduct) {
+        throw new Error(`El producto con ID ${productId} no existe`);
+      }
+
+      const createdOrderProduct = await orderProductService.create({
+        product: fetchedProduct.id,
+        order: currentOrder.id,
+        requestedQuantity: productData.requestedQuantity || 0,
+        requestedPackages: productData.requestedPackages || 0,
+        notes:
+          productData.notes || "Producto agregado en actualización de orden",
+        price: parseFloat(productData.price) || 0,
+        ivaIncluded: productData.ivaIncluded || false,
+        invoicePercentage: productData.invoicePercentage || 100,
+        trx,
+      });
+
+      const orderProductWithProduct = {
+        ...createdOrderProduct,
+        product: fetchedProduct,
+        items: [], // Inicializar items vacío para evitar errores posteriores
+      };
+
+      orderProductsByProductId.set(productId, orderProductWithProduct);
+    }
+  });
 
   // Clasificar items
   const { itemsToRemove, itemsToKeep, itemsToAdd } = classifyItems(
@@ -218,43 +258,12 @@ const updateOrderProducts = async (
     } = itemData;
 
     let orderProduct = orderProductsByProductId.get(productId);
-    let product = orderProduct?.product;
 
-    // Si no existe el OrderProduct, crearlo y cachearlo para próximos items del mismo producto
     if (!orderProduct) {
-      let creationPromise = pendingOrderProductCreations.get(productId);
-      if (!creationPromise) {
-        creationPromise = (async () => {
-          const fetchedProduct = await strapi.entityService.findOne(
-            PRODUCT_SERVICE,
-            productId,
-            {
-              transacting: trx,
-            }
-          );
-          if (!fetchedProduct) {
-            throw new Error("El producto no existe");
-          }
-          const createdOrderProduct = await orderProductService.create({
-            product: fetchedProduct.id,
-            order: currentOrder.id,
-            requestedQuantity: 0,
-            requestedPackages: 0,
-            notes: "Producto agregado en actualización de orden",
-            trx,
-          });
-          const orderProductWithProduct = {
-            ...createdOrderProduct,
-            product: fetchedProduct,
-          };
-          orderProductsByProductId.set(productId, orderProductWithProduct);
-          return orderProductWithProduct;
-        })();
-        pendingOrderProductCreations.set(productId, creationPromise);
-      }
-      const createdOrderProduct = await creationPromise;
-      orderProduct = createdOrderProduct;
-      product = createdOrderProduct.product;
+      // Esto no debería suceder gracias al paso previo de aseguramiento
+      throw new Error(
+        `OrderProduct no encontrado para el producto ${productId}`
+      );
     }
 
     // Agregar el item
@@ -263,7 +272,7 @@ const updateOrderProducts = async (
       item,
       order: currentOrder,
       orderProduct: orderProduct,
-      product: product,
+      product: orderProduct.product,
       orderState,
       trx,
     });
@@ -321,7 +330,7 @@ const updateOrderProducts = async (
           newItemData.currentQuantity ||
           itemData.currentQuantity ||
           itemData.quantity,
-        price: newItemData.price || itemData.price || 0,
+        price: parseFloat(newItemData.price || itemData.price) || 0,
         ivaIncluded: newItemData.ivaIncluded || itemData.ivaIncluded || false,
       },
       order: currentOrder,
@@ -372,9 +381,9 @@ const updateExistingOrderProducts = async (
 };
 
 /**
- * Recalcula las cantidades de OrderProducts
+ * Sincroniza los OrderProducts: actualiza cantidades y elimina los que no están en la request
  */
-const recalculateOrderProducts = async (
+const syncOrderProducts = async (
   strapi,
   orderId,
   products,
@@ -391,26 +400,39 @@ const recalculateOrderProducts = async (
     }
   );
 
-  if (!orderProducts || orderProducts.length === 0) {
-    throw new Error("La orden no tiene productos asociados");
-  }
+  if (!orderProducts) return;
 
   await runInBatches(orderProducts, async (orderProduct) => {
     const { product } = orderProduct;
     const dataFromRequest = products.find((p) => p.product === product.id);
-    if (!dataFromRequest) return;
 
+    // Si el producto no está en la request, eliminar el OrderProduct
+    if (!dataFromRequest) {
+      await orderProductService.delete({
+        id: orderProduct.id,
+        trx,
+      });
+      return;
+    }
+
+    // Si está, actualizarlo
     const {
       items,
       orderProduct: _,
       product: p,
       ...updateData
     } = dataFromRequest;
+
     if (updateData.requestedQuantity) {
       updateData.requestedPackages = Math.round(
         updateData.requestedQuantity / product.unitsPerPackage
       );
     }
+
+    if (updateData.price !== undefined) {
+      updateData.price = parseFloat(updateData.price) || 0;
+    }
+
     await orderProductService.update({
       id: orderProduct.id,
       update: updateData,
@@ -427,7 +449,7 @@ module.exports = {
   classifyItems,
   updateOrderProducts,
   updateExistingOrderProducts,
-  recalculateOrderProducts,
+  syncOrderProducts,
   ORDER_POPULATE,
   ORDER_POPULATE_BASIC,
   EDITABLE_STATES,

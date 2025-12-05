@@ -130,7 +130,11 @@ const CreateOrderProductSchema = z
     deliveredPackages: z.number().optional().default(null),
     unit: UnitEnum.optional().default(null),
     notes: z.string().optional().default(""),
-    price: z.number().optional().default(null),
+    price: z
+      .union([z.string(), z.number(), z.null()])
+      .transform((val) => (val === "" ? 0 : Number(val) || 0))
+      .optional()
+      .default(0),
     trx: TRX,
   })
   .catchall(z.any());
@@ -200,7 +204,11 @@ const CreateOrderSchema = z
             )
             .optional()
             .default([]),
-          price: z.union([z.number(), z.null()]).optional().default(null),
+          price: z
+            .union([z.string(), z.number(), z.null()])
+            .transform((val) => (val === "" ? 0 : Number(val) || 0))
+            .optional()
+            .default(null),
           name: z.string().optional().default(null),
         })
       )
@@ -225,6 +233,11 @@ const UpdateOrderSchema = z.object({
           requestedQuantity: z
             .union([z.string(), z.number()])
             .transform(Number)
+            .optional()
+            .default(null),
+          price: z
+            .union([z.string(), z.number(), z.null()])
+            .transform((val) => (val === "" ? 0 : Number(val) || 0))
             .optional()
             .default(null),
         })
