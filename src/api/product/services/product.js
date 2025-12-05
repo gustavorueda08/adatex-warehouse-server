@@ -32,7 +32,20 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         },
       },
       orderProducts: {
-        fields: ["requestedQuantity", "confirmedQuantity", "state"],
+        fields: ["requestedQuantity", "state"],
+        populate: {
+          items: {
+            fields: ["id"],
+          },
+          order: {
+            fields: ["type"],
+            populate: {
+              destinationWarehouse: {
+                fields: ["type"],
+              },
+            },
+          },
+        },
       },
     };
 
@@ -102,32 +115,66 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         transit: 0,
         defective: 0,
         reserved: 0,
+        required: 0,
+        available: 0,
+        netAvailable: 0,
       };
 
-      // Calculate physical stock
+      // Calculate physical stock (stock, transit, defective, reserved from items)
       if (product.items?.length > 0) {
         product.items.forEach((item) => {
-          if (item.state === "available" && item.warehouse) {
-            const qty = Number(item.currentQuantity) || 0;
-            if (stats[item.warehouse.type] !== undefined) {
-              stats[item.warehouse.type] += qty;
+          const qty = Number(item.currentQuantity) || 0;
+
+          // Reserved: items with state 'reserved'
+          if (item.state === "reserved") {
+            stats.reserved += qty;
+          }
+
+          // Warehouse based stats
+          if (item.warehouse?.type) {
+            if (item.warehouse.type === "stock") {
+              stats.stock += qty;
+            } else if (item.warehouse.type === "transit") {
+              stats.transit += qty;
+            } else if (item.warehouse.type === "defective") {
+              stats.defective += qty;
             }
           }
         });
       }
 
-      // Calculate reserved stock (pending orders)
+      // Calculate production and required from orderProducts
       if (product.orderProducts?.length > 0) {
         product.orderProducts.forEach((op) => {
-          if (op.state === "pending") {
-            const requested = Number(op.requestedQuantity) || 0;
-            const confirmed = Number(op.confirmedQuantity) || 0;
-            stats.reserved += Math.max(0, requested - confirmed);
+          const requested = Number(op.requestedQuantity) || 0;
+
+          // Production: items in warehouses of type 'production' (via order destination)
+          // "los production son todos los items que estén en warehause de tipo production, PERO, en este caso usamos los orderProducts con su requestedQuantity"
+          if (op.order?.destinationWarehouse?.type === "production") {
+            stats.production += requested;
+          }
+
+          // Required: sale orders with no assigned items
+          // "required, lo cual sería todos los orderProducts que sean de ordenes de venta que aún no tengan items asignados"
+          if (
+            op.order?.type === "sale" &&
+            (!op.items || op.items.length === 0)
+          ) {
+            stats.required += requested;
           }
         });
       }
 
+      // Available: stock - reserved
       stats.available = Math.max(0, stats.stock - stats.reserved);
+
+      // NetAvailable: stock + production + transit - reserved - required
+      stats.netAvailable =
+        stats.stock +
+        stats.production +
+        stats.transit -
+        stats.reserved -
+        stats.required;
 
       // 6. Cleanup: Remove inventory relations if not requested by user
       const userAskedForItems = userPopulate.items || userPopulate["*"];

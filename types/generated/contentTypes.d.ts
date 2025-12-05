@@ -426,6 +426,36 @@ export interface ApiBarcodeMappingBarcodeMapping
   };
 }
 
+export interface ApiCollectionCollection extends Struct.CollectionTypeSchema {
+  collectionName: 'collections';
+  info: {
+    displayName: 'Collection';
+    pluralName: 'collections';
+    singularName: 'collection';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.Text;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::collection.collection'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String;
+    products: Schema.Attribute.Relation<'manyToMany', 'api::product.product'>;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiConfigurationConfiguration extends Struct.SingleTypeSchema {
   collectionName: 'configurations';
   info: {
@@ -876,6 +906,10 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.DefaultTo<'Confeccion'>;
     code: Schema.Attribute.UID & Schema.Attribute.Required;
+    collections: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::collection.collection'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1649,6 +1683,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::barcode-mapping.barcode-mapping': ApiBarcodeMappingBarcodeMapping;
+      'api::collection.collection': ApiCollectionCollection;
       'api::configuration.configuration': ApiConfigurationConfiguration;
       'api::customer.customer': ApiCustomerCustomer;
       'api::inventory-movement.inventory-movement': ApiInventoryMovementInventoryMovement;

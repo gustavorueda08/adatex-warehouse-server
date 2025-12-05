@@ -78,6 +78,12 @@
         "Tapiceria",
         "PrintLab"
       ]
+    },
+    "collections": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::collection.collection",
+      "mappedBy": "products"
     }
   }
 }
