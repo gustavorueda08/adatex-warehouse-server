@@ -474,6 +474,160 @@ module.exports = ({ strapi }) => ({
   },
 
   /**
+   * Obtiene datos para gráficos de ventas (semanal, mensual, anual)
+   */
+  async getSalesChartData() {
+    moment.tz.setDefault("America/Bogota");
+    const now = moment();
+
+    // 1. Datos Semanales (últimas 12 semanas)
+    const weeklyStart = now.clone().subtract(11, "weeks").startOf("week");
+    const weeklyEnd = now.clone().endOf("week");
+    
+    const weeklySales = await strapi.entityService.findMany(ORDER_SERVICE, {
+      filters: {
+        type: ORDER_TYPES.SALE,
+        state: ORDER_STATES.COMPLETED,
+        completedDate: {
+          $gte: weeklyStart.toDate(),
+          $lte: weeklyEnd.toDate(),
+        },
+      },
+      populate: {
+        orderProducts: {
+          fields: ["deliveredQuantity", "confirmedQuantity", "requestedQuantity", "price", "ivaIncluded"],
+        },
+      },
+      fields: ["state", "completedDate"],
+    });
+
+    // Agrupar por semana
+    const weeklyData = [];
+    let currentWeek = weeklyStart.clone();
+    
+    while (currentWeek.isSameOrBefore(weeklyEnd)) {
+      const weekLabel = `Sem ${currentWeek.week()}`; // Semana del año
+      const weekStart = currentWeek.clone().startOf("week");
+      const weekEnd = currentWeek.clone().endOf("week");
+      
+      const salesInWeek = weeklySales.filter(sale => {
+        const saleDate = moment(sale.completedDate);
+        return saleDate.isBetween(weekStart, weekEnd, undefined, "[]");
+      });
+
+      const total = salesInWeek.reduce((sum, order) => {
+        return sum + this.calculateOrderTotal(order.orderProducts, order.state);
+      }, 0);
+
+      weeklyData.push({
+        label: weekLabel,
+        date: weekStart.format("DD/MM"),
+        value: Math.round(total * 100) / 100,
+      });
+
+      currentWeek.add(1, "weeks");
+    }
+
+    // 2. Datos Mensuales (últimos 12 meses)
+    const monthlyStart = now.clone().subtract(11, "months").startOf("month");
+    const monthlyEnd = now.clone().endOf("month");
+
+    const monthlySales = await strapi.entityService.findMany(ORDER_SERVICE, {
+      filters: {
+        type: ORDER_TYPES.SALE,
+        state: ORDER_STATES.COMPLETED,
+        completedDate: {
+          $gte: monthlyStart.toDate(),
+          $lte: monthlyEnd.toDate(),
+        },
+      },
+      populate: {
+        orderProducts: {
+          fields: ["deliveredQuantity", "confirmedQuantity", "requestedQuantity", "price", "ivaIncluded"],
+        },
+      },
+      fields: ["state", "completedDate"],
+    });
+
+    const monthlyData = [];
+    let currentMonth = monthlyStart.clone();
+
+    while (currentMonth.isSameOrBefore(monthlyEnd)) {
+      const monthLabel = currentMonth.format("MMM YYYY"); // Ene 2024
+      const monthStart = currentMonth.clone().startOf("month");
+      const monthEnd = currentMonth.clone().endOf("month");
+
+      const salesInMonth = monthlySales.filter(sale => {
+        const saleDate = moment(sale.completedDate);
+        return saleDate.isBetween(monthStart, monthEnd, undefined, "[]");
+      });
+
+      const total = salesInMonth.reduce((sum, order) => {
+        return sum + this.calculateOrderTotal(order.orderProducts, order.state);
+      }, 0);
+
+      monthlyData.push({
+        label: monthLabel,
+        value: Math.round(total * 100) / 100,
+      });
+
+      currentMonth.add(1, "months");
+    }
+
+    // 3. Datos Anuales (últimos 5 años)
+    const yearlyStart = now.clone().subtract(4, "years").startOf("year");
+    const yearlyEnd = now.clone().endOf("year");
+
+    const yearlySales = await strapi.entityService.findMany(ORDER_SERVICE, {
+      filters: {
+        type: ORDER_TYPES.SALE,
+        state: ORDER_STATES.COMPLETED,
+        completedDate: {
+          $gte: yearlyStart.toDate(),
+          $lte: yearlyEnd.toDate(),
+        },
+      },
+      populate: {
+        orderProducts: {
+          fields: ["deliveredQuantity", "confirmedQuantity", "requestedQuantity", "price", "ivaIncluded"],
+        },
+      },
+      fields: ["state", "completedDate"],
+    });
+
+    const yearlyData = [];
+    let currentYear = yearlyStart.clone();
+
+    while (currentYear.isSameOrBefore(yearlyEnd)) {
+      const yearLabel = currentYear.format("YYYY");
+      const yearStart = currentYear.clone().startOf("year");
+      const yearEnd = currentYear.clone().endOf("year");
+
+      const salesInYear = yearlySales.filter(sale => {
+        const saleDate = moment(sale.completedDate);
+        return saleDate.isBetween(yearStart, yearEnd, undefined, "[]");
+      });
+
+      const total = salesInYear.reduce((sum, order) => {
+        return sum + this.calculateOrderTotal(order.orderProducts, order.state);
+      }, 0);
+
+      yearlyData.push({
+        label: yearLabel,
+        value: Math.round(total * 100) / 100,
+      });
+
+      currentYear.add(1, "years");
+    }
+
+    return {
+      weekly: weeklyData,
+      monthly: monthlyData,
+      yearly: yearlyData,
+    };
+  },
+
+  /**
    * Obtiene todas las estadísticas del dashboard
    */
   async getDashboardStats() {
@@ -484,6 +638,7 @@ module.exports = ({ strapi }) => ({
       pendingOrders,
       recentSales,
       topProducts,
+      salesChart,
     ] = await Promise.all([
       this.getSalesStats(),
       this.getPurchasesStats(),
@@ -491,6 +646,7 @@ module.exports = ({ strapi }) => ({
       this.getPendingOrdersStats(),
       this.getRecentSales(),
       this.getTopProducts(),
+      this.getSalesChartData(),
     ]);
 
     return {
@@ -502,6 +658,7 @@ module.exports = ({ strapi }) => ({
       },
       recentSales,
       topProducts,
+      salesChart,
     };
   },
 });
