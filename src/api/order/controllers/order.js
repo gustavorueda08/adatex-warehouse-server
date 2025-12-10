@@ -62,7 +62,14 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
 
       const { products = [], ...rest } = data.data;
 
-      console.log("DATOS", data.data);
+      console.log("DATOS", data.data, orderId);
+
+      if (data.data.products) {
+        console.log(
+          "PRODUCTOS",
+          data.data.products.map((p) => p.items)
+        );
+      }
 
       const order = await orderService.update({
         products,

@@ -58,15 +58,16 @@ module.exports = ({ strapi }) => ({
 
       // Mapear a formato local
       const mapperService = strapi.service("api::siigo.mapper");
-      const supplierData = await mapperService.mapSiigoToSupplier(
-        siigoSupplier
-      );
+      const supplierData =
+        await mapperService.mapSiigoToSupplier(siigoSupplier);
 
       // Buscar si ya existe localmente usando db.query para evitar disparar lifecycles
-      const existingSuppliers = await strapi.db.query(SUPPLIER_SERVICE).findMany({
-        where: { siigoId: String(siigoId) },
-        limit: 1,
-      });
+      const existingSuppliers = await strapi.db
+        .query(SUPPLIER_SERVICE)
+        .findMany({
+          where: { siigoId: String(siigoId) },
+          limit: 1,
+        });
 
       let localSupplier;
 
@@ -92,6 +93,45 @@ module.exports = ({ strapi }) => ({
       throw new Error(
         `Error al sincronizar supplier desde Siigo: ${error.message}`
       );
+    }
+  },
+
+  /**
+   * Busca un supplier en Siigo por identificación
+   * @param {String} identification - NIT o Cédula
+   * @returns {Object|null} - Supplier de Siigo si existe
+   */
+  async searchInSiigoByIdentification(identification) {
+    try {
+      const authService = strapi.service("api::siigo.auth");
+      const headers = await authService.getAuthHeaders();
+      const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+
+      const response = await siigoFetch(
+        `${apiUrl}/v1/customers?identification=${identification}`,
+        {
+          method: "GET",
+          headers,
+        }
+      );
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = await response.json();
+      if (data.results && data.results.length > 0) {
+        // Filtrar para asegurarse que sea type="Supplier" o que coincida
+        // Siigo a veces retorna customers que son ambos
+        return data.results[0];
+      }
+      return null;
+    } catch (error) {
+      console.warn(
+        `Error al buscar supplier en Siigo por ID ${identification}:`,
+        error.message
+      );
+      return null;
     }
   },
 
@@ -139,9 +179,8 @@ module.exports = ({ strapi }) => ({
       }
 
       const mapperService = strapi.service("api::siigo.mapper");
-      const siigoSupplierData = await mapperService.mapSupplierToSiigo(
-        supplier
-      );
+      const siigoSupplierData =
+        await mapperService.mapSupplierToSiigo(supplier);
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
       let siigoSupplier;
@@ -201,9 +240,8 @@ module.exports = ({ strapi }) => ({
       }
 
       const mapperService = strapi.service("api::siigo.mapper");
-      const siigoSupplierData = await mapperService.mapSupplierToSiigo(
-        supplier
-      );
+      const siigoSupplierData =
+        await mapperService.mapSupplierToSiigo(supplier);
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
       let siigoSupplier;
@@ -295,9 +333,7 @@ module.exports = ({ strapi }) => ({
         message: "Supplier marcado como inactivo",
       };
     } catch (error) {
-      throw new Error(
-        `Error al eliminar supplier en Siigo: ${error.message}`
-      );
+      throw new Error(`Error al eliminar supplier en Siigo: ${error.message}`);
     }
   },
 
@@ -401,9 +437,8 @@ module.exports = ({ strapi }) => ({
 
   async syncAllToSiigo() {
     try {
-      const localSuppliers = await strapi.entityService.findMany(
-        SUPPLIER_SERVICE
-      );
+      const localSuppliers =
+        await strapi.entityService.findMany(SUPPLIER_SERVICE);
 
       let created = 0;
       let updated = 0;

@@ -57,7 +57,13 @@ module.exports = ({ strapi }) => ({
         );
       }
 
-      if (!seller && !seller?.siigoCode) {
+      if (!seller) {
+        throw new Error(
+          `El cliente ${customer.name} no tiene un vendedor asignado`
+        );
+      }
+
+      if (!seller.siigoCode) {
         throw new Error(
           `El vendedor ${seller.name} no tiene número de identificación en siigo`
         );
@@ -229,7 +235,7 @@ module.exports = ({ strapi }) => ({
       // Obtener taxes del producto/cliente
       const taxes = this.getProductTaxes(orderProduct, customerForInvoice);
       const item = {
-        code: product.siigoId || product.code, // Usar siigoId como código en la factura
+        code: product.code || product.siigoId, // Usar siigoId como código en la factura
         quantity: Math.round(quantityToInvoice * 100) / 100, // Redondear a 2 decimales
         price: basePrice,
         discount: 0, // Agregar lógica de descuento si aplica
@@ -698,7 +704,7 @@ module.exports = ({ strapi }) => ({
       type: "Supplier",
       person_type: "Company",
       id_type: "31", // NIT
-      identification: supplier.code, // Usar code como identification
+      identification: supplier.identification, // Usar identification (NIT/CC)
       name: [supplier.name],
       active: supplier.isActive !== false,
     };
@@ -742,7 +748,7 @@ module.exports = ({ strapi }) => ({
 
     const localSupplier = {
       siigoId: String(siigoSupplier.id),
-      code: siigoSupplier.identification,
+      identification: siigoSupplier.identification,
       name: formatName(rawName),
       isActive: siigoSupplier.active !== false,
     };
@@ -795,9 +801,7 @@ module.exports = ({ strapi }) => ({
     const categoryObj = productCategories.find(
       (c) => c.value === product.category
     );
-    siigoProduct.account_group = categoryObj
-      ? categoryObj.id
-      : 625; // 625 = Confección (default)
+    siigoProduct.account_group = categoryObj ? categoryObj.id : 625; // 625 = Confección (default)
 
     // Clasificación fiscal (por defecto gravado)
     siigoProduct.tax_classification = "Taxed";

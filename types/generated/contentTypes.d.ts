@@ -1049,6 +1049,7 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
+    shouldAppear: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     siigoCode: Schema.Attribute.UID;
     treshold: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     tresholdContidion: Schema.Attribute.Enumeration<

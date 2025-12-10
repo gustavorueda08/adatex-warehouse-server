@@ -64,6 +64,10 @@
         "increment",
         "decrement"
       ]
+    },
+    "shouldAppear": {
+      "type": "boolean",
+      "default": true
     }
   }
 }
