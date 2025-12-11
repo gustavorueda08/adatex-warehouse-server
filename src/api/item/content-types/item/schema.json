@@ -173,6 +173,10 @@
     },
     "invoicedDate": {
       "type": "datetime"
+    },
+    "sourceQuantityConsumed": {
+      "type": "decimal",
+      "default": 0
     }
   }
 }

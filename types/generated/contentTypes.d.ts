@@ -668,6 +668,8 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
       Schema.Attribute.DefaultTo<'approved'>;
     receiptDate: Schema.Attribute.DateTime;
     sourceOrder: Schema.Attribute.Relation<'manyToOne', 'api::order.order'>;
+    sourceQuantityConsumed: Schema.Attribute.Decimal &
+      Schema.Attribute.DefaultTo<0>;
     state: Schema.Attribute.Enumeration<
       ['available', 'reserved', 'sold', 'dropped']
     > &

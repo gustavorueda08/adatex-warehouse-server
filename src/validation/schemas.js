@@ -200,6 +200,8 @@ const CreateOrderSchema = z
                 parentItem: z
                   .union([z.object({}), z.number(), z.null()])
                   .default({}),
+                sourceItemId: ID.optional().default(null),
+                sourceQuantityConsumed: z.number().optional().default(null),
               })
             )
             .optional()

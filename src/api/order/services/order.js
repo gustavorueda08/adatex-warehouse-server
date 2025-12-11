@@ -89,7 +89,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           data: {
             ...orderData,
             code,
-            state: ORDER_STATES.DRAFT,
+            state: orderData.state || ORDER_STATES.DRAFT,
             createdDate: moment().toDate(),
           },
           populate: ORDER_POPULATE_BASIC,

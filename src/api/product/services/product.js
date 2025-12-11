@@ -95,7 +95,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stats.required;
 
       // Cleanup: Remove inventory relations if not requested by user
-      const userAskedForItems = userPopulate.items || userPopulate["*"];
+      const userAskedForItems = userPopulate.items || userPopulate["*"] || userPopulate.includeItems;
       const userAskedForOrderProducts =
         userPopulate.orderProducts || userPopulate["*"];
 
@@ -171,12 +171,36 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
     // 3. Merge user params with inventory requirements
     // Extract pagination params if they exist in the nested format (Strapi v4 standard)
-    // Also extract 'collections' if present to handle custom filtering
+    // Also extract 'collections' and 'includeItems' if present
     const {
       pagination: paginationParams,
       collections,
+      includeItems,
       ...otherParams
     } = params;
+    
+    // Pass includeItems to calculateInventoryForProducts via userPopulate
+    if (includeItems === 'true' || includeItems === true) {
+        userPopulate.includeItems = true;
+        
+        // Ensure we fetch necessary fields for the consumer if they asked for items
+        // We extend the default inventoryPopulate.items to include more fields if needed
+        // For now, inventoryPopulate.items already fetches what we need + populate warehouse
+        // We might want to ensure we fetch *all* fields or specific ones if includeItems is on.
+        // Let's assume the default inventoryPopulate structure is sufficient or we add to it.
+        // Actually, for "includeItems", the user likely wants full item details + warehouse.
+        
+        inventoryPopulate.items = {
+            ...inventoryPopulate.items,
+            populate: {
+                ...inventoryPopulate.items.populate,
+                warehouse: true, // Fetch full warehouse info
+            },
+            // Remove fields restriction to get all item fields if includeItems is requested
+            fields: undefined 
+        };
+    }
+
     const { page, pageSize } = paginationParams || {};
 
     const finalParams = {

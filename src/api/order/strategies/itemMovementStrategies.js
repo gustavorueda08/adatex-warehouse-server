@@ -119,6 +119,8 @@ class SaleStrategy extends ItemMovementStrategy {
     product,
   }) {
     // En addItem puede llegar: barcode, id, o quantity+product
+    // NOTA: Esto soporta actualizaciones masivas (Batch).
+    // Si llegan muchos items con ID/Barcode, se buscan y se actualizan a RESERVED aqui.
     const updatePayload = {
       update: {
         state: ITEM_STATES.RESERVED,
@@ -592,6 +594,7 @@ class TransformStrategy extends ItemMovementStrategy {
       originalQuantity: targetQuantity,
       currentQuantity: targetQuantity,
       unit: product.unit,
+      sourceQuantityConsumed,
       warehouse:
         item.warehouse ||
         sourceItem.warehouse?.id ||

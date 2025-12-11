@@ -251,11 +251,16 @@ const updateOrderProducts = async (
   await runInBatches(itemsToAdd, async (itemData) => {
     const {
       product: productId,
-      id,
+      // id, // Removed from destructuring to preserve it in 'item'
       sourceWarehouse,
       parentItem,
       ...item
     } = itemData;
+
+    // Ensure ID is passed if present (for existing items)
+    if (itemData.id) {
+      item.id = itemData.id;
+    }
 
     let orderProduct = orderProductsByProductId.get(productId);
 

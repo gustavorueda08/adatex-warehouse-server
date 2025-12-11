@@ -84,19 +84,29 @@ module.exports = ({ strapi }) => ({
   /**
    * Obtiene las estadísticas de ventas
    */
-  async getSalesStats() {
+  async getSalesStats(sellerId) {
     const { currentMonth, previousMonth } = this.getDateRanges();
 
     // Ventas del mes actual
-    const currentSales = await strapi.entityService.findMany(ORDER_SERVICE, {
-      filters: {
-        type: ORDER_TYPES.SALE,
-        state: ORDER_STATES.COMPLETED,
-        completedDate: {
-          $gte: currentMonth.start,
-          $lte: currentMonth.end,
-        },
+    const currentFilters = {
+      type: ORDER_TYPES.SALE,
+      state: ORDER_STATES.COMPLETED,
+      completedDate: {
+        $gte: currentMonth.start,
+        $lte: currentMonth.end,
       },
+    };
+
+    if (sellerId) {
+      currentFilters.customer = {
+        seller: {
+          id: sellerId,
+        },
+      };
+    }
+
+    const currentSales = await strapi.entityService.findMany(ORDER_SERVICE, {
+      filters: currentFilters,
       populate: {
         orderProducts: {
           fields: [
@@ -112,15 +122,25 @@ module.exports = ({ strapi }) => ({
     });
 
     // Ventas del mes anterior
-    const previousSales = await strapi.entityService.findMany(ORDER_SERVICE, {
-      filters: {
-        type: ORDER_TYPES.SALE,
-        state: ORDER_STATES.COMPLETED,
-        completedDate: {
-          $gte: previousMonth.start,
-          $lte: previousMonth.end,
-        },
+    const previousFilters = {
+      type: ORDER_TYPES.SALE,
+      state: ORDER_STATES.COMPLETED,
+      completedDate: {
+        $gte: previousMonth.start,
+        $lte: previousMonth.end,
       },
+    };
+
+    if (sellerId) {
+      previousFilters.customer = {
+        seller: {
+          id: sellerId,
+        },
+      };
+    }
+
+    const previousSales = await strapi.entityService.findMany(ORDER_SERVICE, {
+      filters: previousFilters,
       populate: {
         orderProducts: {
           fields: [
@@ -282,28 +302,48 @@ module.exports = ({ strapi }) => ({
   /**
    * Obtiene las estadísticas de órdenes pendientes
    */
-  async getPendingOrdersStats() {
+  async getPendingOrdersStats(sellerId) {
     const { currentMonth, previousMonth } = this.getDateRanges();
 
     // Órdenes pendientes actuales
-    const currentPending = await strapi.entityService.count(ORDER_SERVICE, {
-      filters: {
-        state: {
-          $in: [ORDER_STATES.DRAFT, ORDER_STATES.PROCESSING],
-        },
+    const currentFilters = {
+      state: {
+        $in: [ORDER_STATES.DRAFT, ORDER_STATES.PROCESSING],
       },
+    };
+
+    if (sellerId) {
+      currentFilters.customer = {
+        seller: {
+          id: sellerId,
+        },
+      };
+    }
+
+    const currentPending = await strapi.entityService.count(ORDER_SERVICE, {
+      filters: currentFilters,
     });
 
     // Órdenes pendientes del mes anterior
-    const previousPending = await strapi.entityService.count(ORDER_SERVICE, {
-      filters: {
-        state: {
-          $in: [ORDER_STATES.DRAFT, ORDER_STATES.PROCESSING],
-        },
-        createdAt: {
-          $lte: previousMonth.end,
-        },
+    const previousFilters = {
+      state: {
+        $in: [ORDER_STATES.DRAFT, ORDER_STATES.PROCESSING],
       },
+      createdAt: {
+        $lte: previousMonth.end,
+      },
+    };
+
+    if (sellerId) {
+      previousFilters.customer = {
+        seller: {
+          id: sellerId,
+        },
+      };
+    }
+
+    const previousPending = await strapi.entityService.count(ORDER_SERVICE, {
+      filters: previousFilters,
     });
 
     const change = this.calculatePercentageChange(
@@ -323,12 +363,22 @@ module.exports = ({ strapi }) => ({
   /**
    * Obtiene las ventas recientes (últimas 5)
    */
-  async getRecentSales() {
+  async getRecentSales(sellerId) {
+    const filters = {
+      type: ORDER_TYPES.SALE,
+      state: ORDER_STATES.COMPLETED,
+    };
+
+    if (sellerId) {
+      filters.customer = {
+        seller: {
+          id: sellerId,
+        },
+      };
+    }
+
     const sales = await strapi.entityService.findMany(ORDER_SERVICE, {
-      filters: {
-        type: ORDER_TYPES.SALE,
-        state: ORDER_STATES.COMPLETED,
-      },
+      filters,
       sort: { completedDate: "desc" },
       limit: 5,
       populate: {
@@ -382,19 +432,29 @@ module.exports = ({ strapi }) => ({
   /**
    * Obtiene los productos más vendidos (top 5)
    */
-  async getTopProducts() {
+  async getTopProducts(sellerId) {
     const { currentMonth } = this.getDateRanges();
+
+    const filters = {
+      type: ORDER_TYPES.SALE,
+      state: ORDER_STATES.COMPLETED,
+      completedDate: {
+        $gte: currentMonth.start,
+        $lte: currentMonth.end,
+      },
+    };
+
+    if (sellerId) {
+      filters.customer = {
+        seller: {
+          id: sellerId,
+        },
+      };
+    }
 
     // Obtener todas las órdenes de venta completadas del mes
     const sales = await strapi.entityService.findMany(ORDER_SERVICE, {
-      filters: {
-        type: ORDER_TYPES.SALE,
-        state: ORDER_STATES.COMPLETED,
-        completedDate: {
-          $gte: currentMonth.start,
-          $lte: currentMonth.end,
-        },
-      },
+      filters,
       populate: {
         orderProducts: {
           populate: {
@@ -476,9 +536,22 @@ module.exports = ({ strapi }) => ({
   /**
    * Obtiene datos para gráficos de ventas (semanal, mensual, anual)
    */
-  async getSalesChartData() {
+  async getSalesChartData(sellerId) {
     moment.tz.setDefault("America/Bogota");
     const now = moment();
+
+    const baseFilters = {
+      type: ORDER_TYPES.SALE,
+      state: ORDER_STATES.COMPLETED,
+    };
+
+    if (sellerId) {
+      baseFilters.customer = {
+        seller: {
+          id: sellerId,
+        },
+      };
+    }
 
     // 1. Datos Semanales (últimas 12 semanas)
     const weeklyStart = now.clone().subtract(11, "weeks").startOf("week");
@@ -486,8 +559,7 @@ module.exports = ({ strapi }) => ({
     
     const weeklySales = await strapi.entityService.findMany(ORDER_SERVICE, {
       filters: {
-        type: ORDER_TYPES.SALE,
-        state: ORDER_STATES.COMPLETED,
+        ...baseFilters,
         completedDate: {
           $gte: weeklyStart.toDate(),
           $lte: weeklyEnd.toDate(),
@@ -534,8 +606,7 @@ module.exports = ({ strapi }) => ({
 
     const monthlySales = await strapi.entityService.findMany(ORDER_SERVICE, {
       filters: {
-        type: ORDER_TYPES.SALE,
-        state: ORDER_STATES.COMPLETED,
+        ...baseFilters,
         completedDate: {
           $gte: monthlyStart.toDate(),
           $lte: monthlyEnd.toDate(),
@@ -580,8 +651,7 @@ module.exports = ({ strapi }) => ({
 
     const yearlySales = await strapi.entityService.findMany(ORDER_SERVICE, {
       filters: {
-        type: ORDER_TYPES.SALE,
-        state: ORDER_STATES.COMPLETED,
+        ...baseFilters,
         completedDate: {
           $gte: yearlyStart.toDate(),
           $lte: yearlyEnd.toDate(),
@@ -630,23 +700,23 @@ module.exports = ({ strapi }) => ({
   /**
    * Obtiene todas las estadísticas del dashboard
    */
-  async getDashboardStats() {
+  async getDashboardStats(sellerId) {
     const [
       totalSales,
-      totalPurchases,
-      inventory,
+      totalPurchases, // No se filtra por seller
+      inventory, // No se filtra por seller
       pendingOrders,
       recentSales,
       topProducts,
       salesChart,
     ] = await Promise.all([
-      this.getSalesStats(),
+      this.getSalesStats(sellerId),
       this.getPurchasesStats(),
       this.getInventoryStats(),
-      this.getPendingOrdersStats(),
-      this.getRecentSales(),
-      this.getTopProducts(),
-      this.getSalesChartData(),
+      this.getPendingOrdersStats(sellerId),
+      this.getRecentSales(sellerId),
+      this.getTopProducts(sellerId),
+      this.getSalesChartData(sellerId),
     ]);
 
     return {
