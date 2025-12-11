@@ -10,7 +10,12 @@ module.exports = {
 
     const io = new Server(strapi.server.httpServer, {
       cors: {
-        origin: ["http://localhost:3000", "https://tu-dominio.com"],
+        origin: [
+          "http://localhost:3000",
+          "https://www.adatex.com.co",
+          "https://adatex.com.co",
+          "https://adatex-warehouse-server-production.up.railway.app",
+        ],
         methods: ["GET", "POST"],
         credentials: true,
       },
