@@ -336,11 +336,12 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
 
       // Crear nuevos prices vinculándolos al customer
       for (const price of toCreate) {
+        const { id, ...priceData } = price; // Eliminar id si viene null/undefined
         await strapi.entityService.create(
           "api::price.price",
           {
             data: {
-              ...price,
+              ...priceData,
               customer: currentCustomer.id,
             },
           },
