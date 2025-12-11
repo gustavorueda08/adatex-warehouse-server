@@ -81,14 +81,36 @@ module.exports = ({ strapi }) => ({
       );
 
       // Calcular el subTotal de la factura desde los items
+      // IMPORTANTE: Redondear cada línea a 2 decimales para coincidir con el cálculo de Siigo
       let invoiceSubtotal = items.reduce(
-        (acc, item) => acc + item.price * item.quantity,
+        (acc, item) => acc + Math.round(item.price * item.quantity * 100) / 100,
         0
       );
+      invoiceSubtotal = Math.round(invoiceSubtotal * 100) / 100;
 
-      // Aplicar impuestos a nivel de producto (obtener tasa de impuestos del cliente)
-      const customerTaxRate = this._getCustomerTaxRate(customer);
-      const invoiceTaxes = invoiceSubtotal * customerTaxRate;
+      // Aplicar impuestos a nivel de producto calculados individualmente
+      // Siigo calcula cada impuesto por separado, lo redondea y luego suma
+      let invoiceTaxes = 0;
+      if (customer?.taxes?.length > 0) {
+        // Solo procesar taxes de tipo "product"
+        const productTaxes = customer.taxes.filter(
+          ({ applicationType }) => applicationType === "product"
+        );
+
+        for (const tax of productTaxes) {
+          const taxRate = parseFloat(tax.amount) || 0;
+          const calculatedTax = invoiceSubtotal * taxRate;
+          const roundedCalculatedTax = Math.round(calculatedTax * 100) / 100;
+
+          // Si es decrement, resta; si es increment, suma
+          if (tax.use === "decrement") {
+            invoiceTaxes -= roundedCalculatedTax;
+          } else {
+            invoiceTaxes += roundedCalculatedTax;
+          }
+        }
+      }
+      invoiceTaxes = Math.round(invoiceTaxes * 100) / 100;
 
       // Calcular retenciones basadas en el subtotal
       const retentions = this.getSubtotalTaxes(invoiceSubtotal, customer);
@@ -121,16 +143,22 @@ module.exports = ({ strapi }) => ({
             if (shouldApply) {
               const taxAmount = parseFloat(tax.amount) || 0;
               const calculatedTax = invoiceSubtotal * taxAmount;
+              const roundedCalculatedTax =
+                Math.round(calculatedTax * 100) / 100;
+
               // Si es decrement, resta; si es increment, suma
               if (tax.use === "decrement") {
-                retentionsAmount -= calculatedTax;
+                retentionsAmount -= roundedCalculatedTax;
               } else {
-                retentionsAmount += calculatedTax;
+                retentionsAmount += roundedCalculatedTax;
               }
             }
           }
         }
       }
+
+      // Asegurar que retentionsAmount esté redondeado (por si acaso)
+      retentionsAmount = Math.round(retentionsAmount * 100) / 100;
 
       // Calcular total final: subtotal + taxes de producto + taxes/retenciones de subtotal
       const invoiceTotal =
@@ -140,9 +168,7 @@ module.exports = ({ strapi }) => ({
       // Log para debugging
       console.log("=== Cálculo de factura ===");
       console.log(`Subtotal (sin IVA): ${invoiceSubtotal}`);
-      console.log(
-        `Tasa de impuesto producto: ${customerTaxRate} (${customerTaxRate * 100}%)`
-      );
+      // console.log(`Tasa de impuesto producto: ${customerTaxRate} (${customerTaxRate * 100}%)`); // Removed as variable no longer exists
       console.log(`Impuestos producto: ${invoiceTaxes}`);
       console.log(`Retenciones/Taxes subtotal: ${retentionsAmount}`);
       console.log(`Total factura: ${invoiceTotal}`);

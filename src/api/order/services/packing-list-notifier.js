@@ -24,8 +24,7 @@ module.exports = ({ strapi }) => ({
         throw new Error(`Orden ${orderId} no encontrada`);
       }
 
-      const hasInvoices =
-        hasInvoiceTypeA(order) || hasInvoiceTypeB(order);
+      const hasInvoices = hasInvoiceTypeA(order) || hasInvoiceTypeB(order);
 
       if (!hasInvoices) {
         logger.warn(
@@ -266,7 +265,12 @@ Equipo Adatex`;
       return;
     }
 
-    await strapi.entityService.update(ORDER_SERVICE, orderId, {
+    // IMPORTANTE:
+    // Usamos strapi.db.query para evitar usar el contexto de transacción del lifecycle original
+    // ya que este proceso se ejecuta en background y la transacción original ya se cerró.
+    // entityService intenta reutilizar la transacción, strapi.db.query no.
+    await strapi.db.query(ORDER_SERVICE).update({
+      where: { id: orderId },
       data: {
         attachments: [...currentAttachmentIds, fileId],
       },
@@ -304,8 +308,7 @@ function buildEmailSubject(order) {
 }
 
 function getCustomerDisplayName(order) {
-  const candidate =
-    order.customer ||
+  const candidate = order.customer ||
     order.customerForInvoice ||
     order.destinationWarehouse || {
       name: "",

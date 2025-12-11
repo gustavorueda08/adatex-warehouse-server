@@ -20,7 +20,32 @@ module.exports = [
     },
   },
   "strapi::errors",
-  "strapi::security",
+  {
+    name: "strapi::security",
+    config: {
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          "connect-src": ["'self'", "https:"],
+          "img-src": [
+            "'self'",
+            "data:",
+            "blob:",
+            "dl.airtable.com",
+            "https://adatex.s3.us-east-2.amazonaws.com/",
+          ],
+          "media-src": [
+            "'self'",
+            "data:",
+            "blob:",
+            "dl.airtable.com",
+            "https://adatex.s3.us-east-2.amazonaws.com/",
+          ],
+          upgradeInsecureRequests: null,
+        },
+      },
+    },
+  },
   "strapi::poweredBy",
   "strapi::query",
   "strapi::body",

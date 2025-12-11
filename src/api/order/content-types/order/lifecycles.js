@@ -96,7 +96,19 @@ module.exports = {
         const packingListNotifier = strapi.service(
           "api::order.packing-list-notifier"
         );
-        await packingListNotifier.sendPackingListToSeller(result.id);
+        // Enviar email de packing list de forma asíncrona (fire and forget)
+        // Usamos setTimeout para "romper" el contexto de transacción de Strapi
+        // y evitar el error "Transaction query already complete" en el servicio de upload
+        setTimeout(() => {
+          packingListNotifier
+            .sendPackingListToSeller(result.id)
+            .catch((err) => {
+              console.error(
+                `Error al enviar packing list en background para orden ${result.code}:`,
+                err.message
+              );
+            });
+        }, 500);
       }
     } catch (error) {
       console.error("Error en lifecycle afterUpdate de Order:", error.message);
