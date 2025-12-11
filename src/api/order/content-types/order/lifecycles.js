@@ -1,5 +1,7 @@
 "use strict";
 
+const logger = require("../../../../utils/logger");
+
 /**
  * Lifecycle callbacks para el content-type Order
  */
@@ -11,6 +13,7 @@ module.exports = {
   async afterUpdate(event) {
     try {
       const { result, params } = event;
+      logger.info("Order updated", { result, params });
 
       const stateChangedToCompleted =
         result?.state === "completed" &&
@@ -93,22 +96,9 @@ module.exports = {
             // No lanzamos el error para no afectar el flujo principal del update
           }
         }
-        const packingListNotifier = strapi.service(
-          "api::order.packing-list-notifier"
-        );
-        // Enviar email de packing list de forma asíncrona (fire and forget)
-        // Usamos setTimeout para "romper" el contexto de transacción de Strapi
-        // y evitar el error "Transaction query already complete" en el servicio de upload
-        setTimeout(() => {
-          packingListNotifier
-            .sendPackingListToSeller(result.id)
-            .catch((err) => {
-              console.error(
-                `Error al enviar packing list en background para orden ${result.code}:`,
-                err.message
-              );
-            });
-        }, 500);
+        // La notificación de packing list ahora se maneja vía Cron Task (config/cron-tasks.js)
+        // para evitar errores de "Transaction query already complete" y asegurar que se envíe
+        // incluso si la transacción original falla o tarda mucho.
       }
     } catch (error) {
       console.error("Error en lifecycle afterUpdate de Order:", error.message);

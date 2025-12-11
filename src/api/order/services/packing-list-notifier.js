@@ -14,8 +14,70 @@ const { generatePackingListPDF } = require("./packing-list-pdf");
  */
 module.exports = ({ strapi }) => ({
   /**
+   * Procesa las órdenes completadas que aún no tienen lista de empaque enviada.
+   * Se ejecuta vía Cron.
+   */
+  async processPendingOrders() {
+    try {
+      logger.info("Cron: Buscando órdenes pendientes de lista de empaque...");
+
+      // Buscar órdenes completadas recientemente (últimas 24h) para no escanear toda la DB
+      // y que NO tengan una factura asociada (aunque validamos eso después)
+      const since = moment().subtract(24, "hours").toISOString();
+
+      const orders = await strapi.entityService.findMany(ORDER_SERVICE, {
+        filters: {
+          state: "completed",
+          updatedAt: { $gte: since },
+        },
+        populate: ["attachments", "customer", "customer.seller"],
+      });
+
+      let processedCount = 0;
+
+      for (const order of orders) {
+        // Verificar si ya tiene lista de empaque en adjuntos
+        const hasPackingList = order.attachments?.some(
+          (file) =>
+            file.caption?.includes("Packing list") ||
+            file.name?.includes("Packing list") ||
+            file.name?.startsWith("LE ")
+        );
+
+        if (hasPackingList) {
+          continue;
+        }
+
+        // Verificar si tiene facturas (necesario para enviar)
+        // Usamos la función helper existente
+        const hasSales = order.type === "sale" || order.type === "partial-invoice";
+        if (!hasSales) continue;
+        
+        // Intentar enviar
+        try {
+          const sent = await this.sendPackingListToSeller(order.id);
+          if (sent) {
+            processedCount++;
+          }
+        } catch (err) {
+          logger.error(`Cron: Error procesando orden ${order.code}: ${err.message}`);
+        }
+      }
+
+      if (processedCount > 0) {
+        logger.info(`Cron: Enviadas ${processedCount} listas de empaque pendientes.`);
+      } else {
+        logger.info("Cron: No se enviaron listas de empaque en esta ejecución.");
+      }
+    } catch (error) {
+      logger.error("Error en cron de packing lists:", error.message);
+    }
+  },
+
+  /**
    * Genera el PDF a partir de la orden, lo almacena y envía por email.
    * @param {number} orderId
+   * @returns {Promise<boolean>} True si se envió, False si se omitió
    */
   async sendPackingListToSeller(orderId) {
     try {
@@ -27,28 +89,26 @@ module.exports = ({ strapi }) => ({
       const hasInvoices = hasInvoiceTypeA(order) || hasInvoiceTypeB(order);
 
       if (!hasInvoices) {
-        logger.warn(
-          "Orden completada sin facturas registradas, se omite envío de lista de empaque",
-          { orderId }
-        );
-        return;
+        logger.warn(`Cron: Orden ${order.code} omitida - No tiene facturas (A/B) registradas aún.`);
+        return false;
       }
 
       const sellerInfo = extractSellerInfo(order);
-
       if (!sellerInfo) {
-        logger.warn("Order completed sin seller asociado, se omite correo", {
-          orderId,
-        });
-        return;
+        logger.warn(`Cron: Orden ${order.code} omitida - No se encontró información del seller (Check populate).`);
+        return false;
       }
 
       if (!sellerInfo.email) {
-        logger.warn("Seller sin email disponible, se omite envío", {
-          orderId,
-          sellerId: sellerInfo.id,
-        });
-        return;
+        logger.warn(`Cron: Orden ${order.code} omitida - El seller ${sellerInfo.name} no tiene email.`);
+        return false;
+      }
+
+      // Verificar DE NUEVO si ya tiene el adjunto (por seguridad de concurrencia)
+      const alreadyHasIt = order.attachments?.some(file => file.name.startsWith("LE ") || file.caption?.includes("Packing list"));
+      if (alreadyHasIt) {
+          logger.info(`Cron: Orden ${order.code} omitida - Ya tiene lista de empaque.`);
+          return false;
       }
 
       const { buffer } = await generatePackingListPDF(order);
@@ -82,6 +142,8 @@ module.exports = ({ strapi }) => ({
         sellerId: sellerInfo.id,
         email: sellerInfo.email,
       });
+      
+      return true;
     } catch (error) {
       logger.error("No se pudo enviar la lista de empaque por correo", {
         orderId,
@@ -92,7 +154,10 @@ module.exports = ({ strapi }) => ({
   },
 
   async _fetchOrderForPackingList(orderId) {
-    return strapi.entityService.findOne(ORDER_SERVICE, orderId, {
+    // Usamos strapi.db.query en lugar de entityService para evitar problemas
+    // con el contexto de transacción del lifecycle original (que ya cerró).
+    return strapi.db.query(ORDER_SERVICE).findOne({
+      where: { id: orderId },
       populate: {
         customer: {
           populate: {
@@ -126,25 +191,30 @@ module.exports = ({ strapi }) => ({
     await fs.writeFile(tmpPath, buffer);
 
     try {
-      const uploadedFiles = await uploadService.upload({
-        data: {
-          fileInfo: {
-            name: fileName,
-            alternativeText: `Packing list ${order.code}`,
-            caption: `Packing list ${order.code}`,
+      // Envolvemos la subida en una NUEVA transacción.
+      // Esto sobreescribe cualquier contexto de transacción estancado (closed transaction)
+      // que pudiera existir en el AsyncLocalStorage heredado del lifecycle.
+      const uploadedFiles = await strapi.db.transaction(async () => {
+        return uploadService.upload({
+          data: {
+            fileInfo: {
+              name: fileName,
+              alternativeText: `Packing list ${order.code}`,
+              caption: `Packing list ${order.code}`,
+            },
           },
-        },
-        files: [
-          {
-            path: tmpPath,
-            filepath: tmpPath,
-            name: fileName,
-            originalFilename: fileName,
-            mimetype: "application/pdf",
-            type: "application/pdf",
-            size: buffer.length,
-          },
-        ],
+          files: [
+            {
+              path: tmpPath,
+              filepath: tmpPath,
+              name: fileName,
+              originalFilename: fileName,
+              mimetype: "application/pdf",
+              type: "application/pdf",
+              size: buffer.length,
+            },
+          ],
+        });
       });
 
       const [file] = uploadedFiles || [];
