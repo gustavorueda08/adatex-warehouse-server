@@ -206,7 +206,7 @@ module.exports = ({ strapi }) => ({
    * @param {Object} authService - Servicio de autenticación
    * @returns {Object} - Respuesta de Siigo con la factura creada
    */
-  async _sendInvoiceToSiigo(invoiceData, apiUrl, authService) {
+  async _sendInvoiceToSiigo(invoiceData, apiUrl, authService, retryCount = 0) {
     const headers = await authService.getAuthHeaders();
 
     let response = await siigoFetch(`${apiUrl}/v1/invoices`, {
@@ -237,6 +237,56 @@ module.exports = ({ strapi }) => ({
             `Error HTTP ${response.status} después de renovar token: ${retryError}`
           );
         }
+      } else if (response.status === 400 && retryCount < 1) {
+        // Lógica de reintento para errores de totales (redondeo)
+        console.log(
+          "Error 400 recibido. Intentando extraer valor correcto para reintento..."
+        );
+        try {
+          // Extraer todos los números del mensaje de error
+          // El error suele ser tipo: "The total payments [123.45] does not match the invoice total [123.46]"
+          const numbers = errorData.match(/\d+(\.\d+)?/g);
+
+          if (numbers && numbers.length >= 2) {
+            const currentTotal = invoiceData.payments[0].value;
+            let newTotal = null;
+
+            // Convertir strings a floats y buscar un valor plausible
+            // Plausible = diferente al actual y cercano (diferencia menor a 1.0)
+            for (const numStr of numbers) {
+              const val = parseFloat(numStr);
+              if (
+                Math.abs(val - currentTotal) > 0.0001 &&
+                Math.abs(val - currentTotal) < 1.0
+              ) {
+                newTotal = val;
+                break;
+              }
+            }
+
+            if (newTotal !== null) {
+              console.log(
+                `[Siigo Retry] Ajustando total de pago: ${currentTotal} -> ${newTotal}`
+              );
+
+              // Crear copia profunda para no mutar el original inesperadamente si hubiera más lógicas
+              const newInvoiceData = JSON.parse(JSON.stringify(invoiceData));
+              newInvoiceData.payments[0].value = newTotal;
+
+              return await this._sendInvoiceToSiigo(
+                newInvoiceData,
+                apiUrl,
+                authService,
+                retryCount + 1
+              );
+            }
+          }
+        } catch (retryError) {
+          console.error("Fallo en lógica de reintento:", retryError);
+          // Fallthrough al error original
+        }
+
+        throw new Error(`Error HTTP ${response.status}: ${errorData}`);
       } else {
         throw new Error(`Error HTTP ${response.status}: ${errorData}`);
       }
