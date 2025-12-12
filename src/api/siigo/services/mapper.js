@@ -88,25 +88,33 @@ module.exports = ({ strapi }) => ({
       );
       invoiceSubtotal = Math.round(invoiceSubtotal * 100) / 100;
 
-      // Aplicar impuestos a nivel de producto calculados individualmente
-      // Siigo calcula cada impuesto por separado, lo redondea y luego suma
+      // Aplicar impuestos a nivel de producto calculados individualmente POR ÍTEM
+      // Siigo calcula: Suma(Redondeo(PrecioItem * Cantidad * TasaImpuesto))
       let invoiceTaxes = 0;
-      if (customer?.taxes?.length > 0) {
-        // Solo procesar taxes de tipo "product"
-        const productTaxes = customer.taxes.filter(
-          ({ applicationType }) => applicationType === "product"
-        );
 
-        for (const tax of productTaxes) {
-          const taxRate = parseFloat(tax.amount) || 0;
-          const calculatedTax = invoiceSubtotal * taxRate;
-          const roundedCalculatedTax = Math.round(calculatedTax * 100) / 100;
+      for (const item of items) {
+        if (item.taxes && item.taxes.length > 0) {
+          const itemSubtotal = item.price * item.quantity;
 
-          // Si es decrement, resta; si es increment, suma
-          if (tax.use === "decrement") {
-            invoiceTaxes -= roundedCalculatedTax;
-          } else {
-            invoiceTaxes += roundedCalculatedTax;
+          for (const itemTax of item.taxes) {
+            // Buscar la definición del impuesto en customer.taxes para obtener la tasa
+            const taxDef = customer.taxes.find(
+              (t) => parseInt(t.siigoCode) === itemTax.id
+            );
+
+            if (taxDef) {
+              const taxRate = parseFloat(taxDef.amount) || 0;
+              // Calculamos el impuesto para este ítem y lo redondeamos
+              const itemTaxAmount =
+                Math.round(itemSubtotal * taxRate * 100) / 100;
+
+              // Si es decrement, resta; si es increment (default), suma
+              if (taxDef.use === "decrement") {
+                invoiceTaxes -= itemTaxAmount;
+              } else {
+                invoiceTaxes += itemTaxAmount;
+              }
+            }
           }
         }
       }

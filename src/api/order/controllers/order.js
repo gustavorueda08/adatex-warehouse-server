@@ -15,19 +15,13 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
     try {
       const orderService = strapi.service(ORDER_SERVICE);
       const data = ctx.request.body;
-
       if (!data?.data) {
         throw new Error("Los datos de la orden son requeridos");
       }
-
-      console.log("DATOS", data.data);
-
       const order = await orderService.create(data.data);
-
       if (!order) {
         throw new Error("Error al crear la orden");
       }
-
       return {
         data: order,
         meta: {},
@@ -61,16 +55,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       }
 
       const { products = [], ...rest } = data.data;
-
-      console.log("DATOS", data.data, orderId);
-
-      if (data.data.products) {
-        console.log(
-          "PRODUCTOS",
-          data.data.products.map((p) => p.items)
-        );
-      }
-
       const order = await orderService.update({
         products,
         update: { ...rest },
