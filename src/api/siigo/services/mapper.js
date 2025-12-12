@@ -94,7 +94,10 @@ module.exports = ({ strapi }) => ({
 
       for (const item of items) {
         if (item.taxes && item.taxes.length > 0) {
-          const itemSubtotal = item.price * item.quantity;
+          // FIX: Usar el subtotal redondeado como base para el cálculo de impuestos
+          // Esto asegura consistencia con invoiceSubtotal y el motor de Siigo
+          const itemSubtotal =
+            Math.round(item.price * item.quantity * 100) / 100;
 
           for (const itemTax of item.taxes) {
             // Buscar la definición del impuesto en customer.taxes para obtener la tasa
@@ -174,12 +177,23 @@ module.exports = ({ strapi }) => ({
         100;
 
       // Log para debugging
-      console.log("=== Cálculo de factura ===");
-      console.log(`Subtotal (sin IVA): ${invoiceSubtotal}`);
-      // console.log(`Tasa de impuesto producto: ${customerTaxRate} (${customerTaxRate * 100}%)`); // Removed as variable no longer exists
-      console.log(`Impuestos producto: ${invoiceTaxes}`);
+      console.log("=== Cálculo de factura DETALLADO ===");
+      console.log(`Subtotal (suma de items redondeados): ${invoiceSubtotal}`);
+      console.log(
+        `Impuestos producto (suma de impuestos redondeados): ${invoiceTaxes}`
+      );
       console.log(`Retenciones/Taxes subtotal: ${retentionsAmount}`);
-      console.log(`Total factura: ${invoiceTotal}`);
+      console.log(`Total factura calculado: ${invoiceTotal}`);
+
+      // Log de items para debug profundo
+      console.log("--- Detalle Items ---");
+      items.forEach((item, idx) => {
+        const lineTotal = Math.round(item.price * item.quantity * 100) / 100;
+        console.log(
+          `#${idx + 1} Code: ${item.code} | Price: ${item.price} | Qty: ${item.quantity} | Total: ${lineTotal}`
+        );
+      });
+      console.log("================================");
 
       // Calcular fecha de vencimiento según términos de pago
       const paymentTermsDays = customer.paymentTerms || 0;
