@@ -84,6 +84,12 @@
       "relation": "manyToMany",
       "target": "api::collection.collection",
       "mappedBy": "products"
+    },
+    "hideFor": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "plugin::users-permissions.user",
+      "mappedBy": "hideProducts"
     }
   }
 }

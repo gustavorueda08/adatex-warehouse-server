@@ -35,5 +35,10 @@ module.exports = {
       method: "POST",
       handler: "order.createPartialInvoice",
     },
+    {
+      path: "/orders/:orderId/invoices",
+      method: "GET",
+      handler: "order.downloadInvoice",
+    },
   ],
 };

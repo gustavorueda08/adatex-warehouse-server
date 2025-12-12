@@ -581,4 +581,160 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
       }
     });
   }),
+
+  /**
+   * Descarga la factura asociada a la orden
+   * @param {Number} orderId - ID de la orden
+   * @param {String} type - Tipo de factura ('A', 'B' o 'ALL')
+   * @returns {Object} - { buffer, mimeType, filename, type }
+   */
+  async downloadInvoice(orderId, type = "ALL") {
+    try {
+      // 1. Obtener la orden con customer
+      const order = await strapi.entityService.findOne(ORDER_SERVICE, orderId, {
+        populate: ["customer"],
+      });
+
+      if (!order) {
+        throw new Error("Orden no encontrada");
+      }
+
+      const siigoInvoiceService = strapi.service("api::siigo.invoice");
+      const archiver = require("archiver");
+      const { Writable } = require("stream");
+      const moment = require("moment");
+
+      // Helper para nombre de cliente
+      const getCustomerName = (customer) => {
+        if (!customer) return "Unknown";
+        const name = customer.name || "";
+        const lastName = customer.lastName || "";
+        return `${name} ${lastName}`.trim();
+      };
+
+      // Helper para fecha
+      const getFormattedDate = (date) => {
+        if (!date) return moment().format("DD-MM-YYYY");
+        return moment(date).format("DD-MM-YYYY");
+      };
+
+      const customerName = getCustomerName(order.customer);
+      const dateStr = getFormattedDate(order.actualDispatchDate);
+
+      // Helper para generar nombres de archivo
+      const getFilename = (invoiceType) => {
+        if (invoiceType === "A") {
+          const number = order.invoiceNumberTypeA || "SIN-NUMERO";
+          return `ADTX-${number} - ${customerName} (${dateStr}).pdf`;
+        }
+        if (invoiceType === "B") {
+          const number = order.invoiceNumberTypeB || "SIN-NUMERO";
+          return `AD-${number} - ${customerName} (${dateStr}).pdf`;
+        }
+        return `invoice_${invoiceType}_${order.code || orderId}.pdf`;
+      };
+
+      // 2. Determinar IDs disponibles
+      const idA = order.siigoIdTypeA || order.siigoId;
+      const idB = order.siigoIdTypeB;
+
+      // 3. Lógica para "ALL" (automático)
+      if (type === "ALL") {
+        // Caso 1: Ambas existen -> ZIP
+        if (idA && idB) {
+          const [pdfA, pdfB] = await Promise.all([
+            siigoInvoiceService.downloadInvoicePdf(idA),
+            siigoInvoiceService.downloadInvoicePdf(idB),
+          ]);
+
+          // Crear ZIP en memoria
+          const chunks = [];
+          const output = new Writable({
+            write(chunk, encoding, callback) {
+              chunks.push(chunk);
+              callback();
+            },
+          });
+
+          return new Promise((resolve, reject) => {
+            const archive = archiver("zip", { zlib: { level: 9 } });
+
+            archive.on("error", (err) => reject(err));
+            output.on("finish", () => {
+              const buffer = Buffer.concat(chunks);
+              const zipFilename = `Facturas - ${customerName} (${dateStr}).zip`;
+              resolve({
+                buffer,
+                mimeType: "application/zip",
+                filename: zipFilename,
+                type: "zip",
+              });
+            });
+
+            archive.pipe(output);
+            archive.append(pdfA, { name: getFilename("A") });
+            archive.append(pdfB, { name: getFilename("B") });
+            archive.finalize();
+          });
+        }
+
+        // Caso 2: Solo una existe -> PDF directo
+        // Si hay A, devolvemos A. Si no hay A pero hay B (raro), devolvemos B.
+        if (idA) {
+          const pdfBuffer = await siigoInvoiceService.downloadInvoicePdf(idA);
+          return {
+            buffer: pdfBuffer,
+            mimeType: "application/pdf",
+            filename: getFilename("A"),
+            type: "pdf",
+          };
+        }
+
+        if (idB) {
+          const pdfBuffer = await siigoInvoiceService.downloadInvoicePdf(idB);
+          return {
+            buffer: pdfBuffer,
+            mimeType: "application/pdf",
+            filename: getFilename("B"),
+            type: "pdf",
+          };
+        }
+
+        throw new Error("La orden no tiene facturas asociadas");
+      }
+
+      // 4. Lógica para tipos específicos ('A' o 'B')
+      let siigoInvoiceId;
+      let suffix; // Ya no se usa para el filename final, pero lo dejo por estructura
+
+      if (type === "A") {
+        siigoInvoiceId = idA;
+        suffix = "A";
+        if (!siigoInvoiceId) {
+          throw new Error("La orden no tiene una factura Tipo A asociada");
+        }
+      } else if (type === "B") {
+        siigoInvoiceId = idB;
+        suffix = "B";
+        if (!siigoInvoiceId) {
+          throw new Error("La orden no tiene una factura Tipo B asociada");
+        }
+      } else {
+        throw new Error("Tipo de factura inválido");
+      }
+
+      const pdfBuffer =
+        await siigoInvoiceService.downloadInvoicePdf(siigoInvoiceId);
+
+      return {
+        buffer: pdfBuffer,
+        mimeType: "application/pdf",
+        filename: getFilename(type),
+        type: "pdf",
+      };
+    } catch (error) {
+      // Propagar error para que el controller lo maneje
+      throw error;
+    }
+  },
 }));

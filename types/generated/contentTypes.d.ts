@@ -916,6 +916,10 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     description: Schema.Attribute.Text;
+    hideFor: Schema.Attribute.Relation<
+      'manyToMany',
+      'plugin::users-permissions.user'
+    >;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     items: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -1625,6 +1629,10 @@ export interface PluginUsersPermissionsUser
     generatedVirtualBarcodes: Schema.Attribute.Relation<
       'oneToMany',
       'api::barcode-mapping.barcode-mapping'
+    >;
+    hideProducts: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::product.product'
     >;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<

@@ -292,4 +292,58 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       });
     }
   },
+
+  /**
+   * Descarga el PDF de la factura asociada a la orden
+   * GET /api/orders/:orderId/invoices?type=A|B
+   */
+  async downloadInvoice(ctx) {
+    try {
+      const orderService = strapi.service(ORDER_SERVICE);
+      const { orderId } = ctx.params;
+      const { type } = ctx.query;
+
+      if (!orderId) {
+        throw new Error("El id de la orden es requerido");
+      }
+
+      // Validar tipo (por defecto ALL si no se especifica)
+      const invoiceType = (type || "ALL").toUpperCase();
+      if (!["A", "B", "ALL"].includes(invoiceType)) {
+        throw new Error("El tipo de factura debe ser 'A', 'B' o 'ALL'");
+      }
+
+      // El servicio ahora retorna { buffer, mimeType, filename, type }
+      const downloadData = await orderService.downloadInvoice(
+        orderId,
+        invoiceType
+      );
+
+      ctx.set("Content-Type", downloadData.mimeType);
+      ctx.set(
+        "Content-Disposition",
+        `attachment; filename="${downloadData.filename}"`
+      );
+      ctx.body = downloadData.buffer;
+    } catch (error) {
+      logger.error("Error al descargar factura:", error);
+
+      // Si el error es "No existe factura...", retornar 404
+      if (
+        error.message.includes("No existe factura") ||
+        error.message.includes("no encontrada")
+      ) {
+        return ctx.notFound(error.message);
+      }
+
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "InvoiceDownloadError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
 }));
