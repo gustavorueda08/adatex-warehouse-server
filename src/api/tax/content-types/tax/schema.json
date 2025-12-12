@@ -16,7 +16,7 @@
       "required": true
     },
     "amount": {
-      "type": "decimal",
+      "type": "float",
       "required": true
     },
     "type": {

@@ -106,7 +106,7 @@ module.exports = ({ strapi }) => ({
             );
 
             if (taxDef) {
-              const taxRate = parseFloat(taxDef.amount) || 0;
+              const taxRate = this._getEffectiveTaxRate(taxDef);
               // Calculamos el impuesto para este ítem y lo redondeamos
               const itemTaxAmount =
                 Math.round(itemSubtotal * taxRate * 100) / 100;
@@ -152,7 +152,7 @@ module.exports = ({ strapi }) => ({
             }
 
             if (shouldApply) {
-              const taxAmount = parseFloat(tax.amount) || 0;
+              const taxAmount = this._getEffectiveTaxRate(tax);
               const calculatedTax = invoiceSubtotal * taxAmount;
               const roundedCalculatedTax =
                 Math.round(calculatedTax * 100) / 100;
@@ -302,6 +302,39 @@ module.exports = ({ strapi }) => ({
   },
 
   /**
+   * Helper para obtener la tasa real del impuesto.
+   * Si el nombre del impuesto incluye un porcentaje (e.g. "2.5%"), intenta usar ese valor
+   * si la diferencia con el valor almacenado es significativa (problemas de redondeo en DB).
+   */
+  _getEffectiveTaxRate(tax) {
+    let rate = parseFloat(tax.amount) || 0;
+
+    // Si el nombre tiene formato de porcentaje, intentamos validar
+    if (tax.name && tax.name.includes("%")) {
+      try {
+        // Buscar patrón como "2.5%" o "2,5%"
+        const match = tax.name.match(/(\d+[.,]?\d*)%/);
+        if (match && match[1]) {
+          const stringVal = match[1].replace(",", ".");
+          const nameRate = parseFloat(stringVal) / 100;
+
+          // Si la diferencia es mayor a 0.001 (e.g. 0.03 vs 0.025), confiamos en el nombre
+          // Esto arregla el caso donde 2.5% se guardó como 0.03 por redondeo
+          if (Math.abs(rate - nameRate) > 0.001) {
+            console.warn(
+              `[TAX-FIX] Tax "${tax.name}" tiene valor ${rate} pero el nombre indica ${nameRate}. Usando ${nameRate}.`
+            );
+            return nameRate;
+          }
+        }
+      } catch (e) {
+        // Ignorar errores de parsing, fallback al valor de DB
+      }
+    }
+    return rate;
+  },
+
+  /**
    * Obtiene la tasa total de impuestos para un cliente
    * Solo considera taxes a nivel de producto (applicationType: "product")
    * Distingue entre increment (suma) y decrement (resta)
@@ -318,7 +351,7 @@ module.exports = ({ strapi }) => ({
     );
     let totalRate = 0;
     for (const tax of productTaxes) {
-      const taxAmount = parseFloat(tax.amount) || 0;
+      const taxAmount = this._getEffectiveTaxRate(tax);
       // Sumar si es increment (IVA), restar si es decrement (retenciones a nivel de producto)
       if (tax.use === "decrement") {
         totalRate -= taxAmount;

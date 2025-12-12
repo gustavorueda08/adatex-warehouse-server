@@ -1036,7 +1036,7 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    amount: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    amount: Schema.Attribute.Float & Schema.Attribute.Required;
     applicationType: Schema.Attribute.Enumeration<['product', 'subtotal']> &
       Schema.Attribute.DefaultTo<'subtotal'>;
     createdAt: Schema.Attribute.DateTime;
