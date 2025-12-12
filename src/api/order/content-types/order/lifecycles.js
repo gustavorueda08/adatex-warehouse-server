@@ -23,6 +23,7 @@ module.exports = {
       // Verificar si la orden cambió a estado 'completed'
       if (stateChangedToCompleted) {
         // Obtener la orden actualizada con todos los datos necesarios (incluyendo relaciones)
+        logger.info("Iniciando camibios");
         const freshOrder = await strapi.entityService.findOne(
           "api::order.order",
           result.id,
@@ -108,20 +109,23 @@ module.exports = {
             );
 
             // Emitir evento de error por WebSocket
-            strapi.io?.to(`order:${freshOrder.id}`).emit("order:invoice-error", {
-              orderId: freshOrder.id,
-              orderCode: freshOrder.code,
-              error: error.message,
-            });
+            strapi.io
+              ?.to(`order:${freshOrder.id}`)
+              .emit("order:invoice-error", {
+                orderId: freshOrder.id,
+                orderCode: freshOrder.code,
+                error: error.message,
+              });
 
             // No lanzamos el error para no afectar el flujo principal del update
           }
         }
 
-
         // La notificación de packing list ahora se maneja vía Cron Task (config/cron-tasks.js)
         // para evitar errores de "Transaction query already complete" y asegurar que se envíe
         // incluso si la transacción original falla o tarda mucho.
+      } else {
+        logger.info("Order updated, but not completed");
       }
     } catch (error) {
       console.error("Error en lifecycle afterUpdate de Order:", error.message);
