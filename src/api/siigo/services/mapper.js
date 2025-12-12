@@ -231,6 +231,7 @@ module.exports = ({ strapi }) => ({
       };
 
       // Agregar retentions solo si existen
+
       if (retentions.length > 0) {
         invoice.retentions = retentions;
       }
@@ -456,6 +457,9 @@ module.exports = ({ strapi }) => ({
 
         if (shouldApply) {
           // Formato de retention para Siigo: solo necesita el ID
+          console.log(
+            `Adding retention from tax: ${tax.name} (Siigo Code: ${tax.siigoCode})`
+          );
           retentions.push({
             id: parseInt(tax.siigoCode),
           });
