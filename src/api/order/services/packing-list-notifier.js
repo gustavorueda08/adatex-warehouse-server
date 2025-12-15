@@ -139,14 +139,33 @@ module.exports = ({ strapi }) => ({
       );
       const finalFileName = buildPackingListFileName(order);
 
-      logger.info(`Cron: Subiendo PDF para orden ${order.code}...`);
-      const uploadStartTime = Date.now();
-      const uploadedFile = await this._uploadPdf(buffer, finalFileName, order);
-      logger.info(
-        `Cron: PDF subido para orden ${order.code}. Duración: ${
-          Date.now() - uploadStartTime
-        }ms`
-      );
+      // Verificar si ya existe el archivo (Idempotencia)
+      const existingFile = await strapi.db
+        .query("plugin::upload.file")
+        .findOne({
+          where: {
+            name: finalFileName,
+            caption: `Packing list ${order.code}`,
+          },
+        });
+
+      let uploadedFile;
+
+      if (existingFile) {
+        logger.info(
+          `Cron: Reutilizando PDF existente (ID: ${existingFile.id}) para orden ${order.code}...`
+        );
+        uploadedFile = existingFile;
+      } else {
+        logger.info(`Cron: Subiendo PDF para orden ${order.code}...`);
+        const uploadStartTime = Date.now();
+        uploadedFile = await this._uploadPdf(buffer, finalFileName, order);
+        logger.info(
+          `Cron: PDF subido para orden ${order.code}. Duración: ${
+            Date.now() - uploadStartTime
+          }ms`
+        );
+      }
 
       logger.info(`Cron: Obteniendo facturas para orden ${order.code}...`);
       const invoiceAttachments = await this._buildInvoiceAttachments(order);
@@ -295,8 +314,8 @@ module.exports = ({ strapi }) => ({
       port,
       secure,
       auth: user && pass ? { user, pass } : undefined,
-      connectionTimeout: 10000, // 10 seconds
-      socketTimeout: 20000, // 20 seconds
+      connectionTimeout: 30000, // 30 seconds
+      socketTimeout: 60000, // 60 seconds
     });
 
     logger.info(
