@@ -95,7 +95,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stats.required;
 
       // Cleanup: Remove inventory relations if not requested by user
-      const userAskedForItems = userPopulate.items || userPopulate["*"] || userPopulate.includeItems;
+      const userAskedForItems =
+        userPopulate.items || userPopulate["*"] || userPopulate.includeItems;
       const userAskedForOrderProducts =
         userPopulate.orderProducts || userPopulate["*"];
 
@@ -178,27 +179,27 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       includeItems,
       ...otherParams
     } = params;
-    
+
     // Pass includeItems to calculateInventoryForProducts via userPopulate
-    if (includeItems === 'true' || includeItems === true) {
-        userPopulate.includeItems = true;
-        
-        // Ensure we fetch necessary fields for the consumer if they asked for items
-        // We extend the default inventoryPopulate.items to include more fields if needed
-        // For now, inventoryPopulate.items already fetches what we need + populate warehouse
-        // We might want to ensure we fetch *all* fields or specific ones if includeItems is on.
-        // Let's assume the default inventoryPopulate structure is sufficient or we add to it.
-        // Actually, for "includeItems", the user likely wants full item details + warehouse.
-        
-        inventoryPopulate.items = {
-            ...inventoryPopulate.items,
-            populate: {
-                ...inventoryPopulate.items.populate,
-                warehouse: true, // Fetch full warehouse info
-            },
-            // Remove fields restriction to get all item fields if includeItems is requested
-            fields: undefined 
-        };
+    if (includeItems === "true" || includeItems === true) {
+      userPopulate.includeItems = true;
+
+      // Ensure we fetch necessary fields for the consumer if they asked for items
+      // We extend the default inventoryPopulate.items to include more fields if needed
+      // For now, inventoryPopulate.items already fetches what we need + populate warehouse
+      // We might want to ensure we fetch *all* fields or specific ones if includeItems is on.
+      // Let's assume the default inventoryPopulate structure is sufficient or we add to it.
+      // Actually, for "includeItems", the user likely wants full item details + warehouse.
+
+      inventoryPopulate.items = {
+        ...inventoryPopulate.items,
+        populate: {
+          ...inventoryPopulate.items.populate,
+          warehouse: true, // Fetch full warehouse info
+        },
+        // Remove fields restriction to get all item fields if includeItems is requested
+        fields: undefined,
+      };
     }
 
     const { page, pageSize } = paginationParams || {};
@@ -387,5 +388,40 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     summary.success = summary.failed === 0;
 
     return summary;
+  },
+
+  /**
+   * Obtiene un producto con sus items (que tengan warehouse) y su historial completo de movimientos.
+   * @param {Number} productId
+   * @returns {Object} Producto con items y movimientos
+   */
+  async getItemsWithHistory(productId) {
+    const serviceUid = "api::product.product";
+    const itemServiceUid = "api::item.item";
+
+    // 1. Obtener producto básico
+    const product = await strapi.entityService.findOne(serviceUid, productId);
+    if (!product) {
+      throw new Error("Product not found");
+    }
+
+    // 2. Obtener items con warehouse
+    // (Usuario solicitó remover historial de movimientos)
+    const items = await strapi.entityService.findMany(itemServiceUid, {
+      filters: {
+        product: productId,
+        warehouse: { $not: null }, // Solo items en algún warehouse
+      },
+      populate: {
+        warehouse: {
+          fields: ["id", "name", "type"],
+        },
+      },
+    });
+
+    return {
+      product,
+      items,
+    };
   },
 }));

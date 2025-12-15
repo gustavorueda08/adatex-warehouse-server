@@ -122,4 +122,37 @@ module.exports = createCoreController("api::product.product", ({ strapi }) => ({
       });
     }
   },
+
+  /**
+   * Obtiene los items de un producto con sus movimientos e historial
+   * GET /api/products/:productId/items
+   */
+  async getItems(ctx) {
+    try {
+      const { productId } = ctx.params;
+      if (!productId) throw new Error("Product ID is required");
+
+      const productService = strapi.service("api::product.product");
+      const result = await productService.getItemsWithHistory(productId);
+
+      return {
+        data: result,
+      };
+    } catch (error) {
+      logger.error("Error fetching product items:", error);
+
+      if (error.message === "Product not found") {
+        return ctx.notFound("Producto no encontrado");
+      }
+
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductItemsError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
 }));

@@ -28,5 +28,14 @@ module.exports = {
         middlewares: [],
       },
     },
+    {
+      method: "GET",
+      path: "/products/:productId/items",
+      handler: "product.getItems",
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
   ],
 };

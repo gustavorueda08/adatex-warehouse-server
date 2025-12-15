@@ -53,13 +53,14 @@ module.exports = ({ strapi }) => ({
         };
       } else {
         const authService = strapi.service("api::siigo.auth");
-        const headers = await authService.getAuthHeaders();
         const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-        const response = await siigoFetch(`${apiUrl}/v1/customers/${siigoId}`, {
-          method: "GET",
-          headers,
-        });
+        const response = await authService.authenticatedFetch(
+          `${apiUrl}/v1/customers/${siigoId}`,
+          {
+            method: "GET",
+          }
+        );
 
         if (!response.ok) {
           throw new Error(
@@ -193,14 +194,15 @@ module.exports = ({ strapi }) => ({
         };
       } else {
         const authService = strapi.service("api::siigo.auth");
-        const headers = await authService.getAuthHeaders();
         const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-        const response = await siigoFetch(`${apiUrl}/v1/customers`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(siigoCustomerData),
-        });
+        const response = await authService.authenticatedFetch(
+          `${apiUrl}/v1/customers`,
+          {
+            method: "POST",
+            body: JSON.stringify(siigoCustomerData),
+          }
+        );
 
         if (!response.ok) {
           const errorData = await response.text();
@@ -282,14 +284,12 @@ module.exports = ({ strapi }) => ({
         };
       } else {
         const authService = strapi.service("api::siigo.auth");
-        const headers = await authService.getAuthHeaders();
         const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-        const response = await siigoFetch(
+        const response = await authService.authenticatedFetch(
           `${apiUrl}/v1/customers/${customer.siigoId}`,
           {
             method: "PUT",
-            headers,
             body: JSON.stringify(siigoCustomerData),
           }
         );
@@ -358,14 +358,12 @@ module.exports = ({ strapi }) => ({
       } else {
         // Siigo no permite DELETE, se marca como inactivo
         const authService = strapi.service("api::siigo.auth");
-        const headers = await authService.getAuthHeaders();
         const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-        const response = await siigoFetch(
+        const response = await authService.authenticatedFetch(
           `${apiUrl}/v1/customers/${customer.siigoId}`,
           {
             method: "PUT",
-            headers,
             body: JSON.stringify({ active: false }),
           }
         );
@@ -424,14 +422,14 @@ module.exports = ({ strapi }) => ({
       }
 
       const authService = strapi.service("api::siigo.auth");
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await siigoFetch(
-        `${apiUrl}/v1/customers?identification=${encodeURIComponent(identification)}`,
+      const response = await authService.authenticatedFetch(
+        `${apiUrl}/v1/customers?identification=${encodeURIComponent(
+          identification
+        )}`,
         {
           method: "GET",
-          headers,
         }
       );
 
@@ -509,14 +507,12 @@ module.exports = ({ strapi }) => ({
       }
 
       const authService = strapi.service("api::siigo.auth");
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await siigoFetch(
+      const response = await authService.authenticatedFetch(
         `${apiUrl}/v1/customers?page=${page}&page_size=${pageSize}`,
         {
           method: "GET",
-          headers,
         }
       );
 

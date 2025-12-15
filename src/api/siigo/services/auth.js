@@ -97,6 +97,53 @@ module.exports = () => ({
   },
 
   /**
+   * Realiza una petición autenticada a la API de Siigo
+   * Maneja automáticamente la renovación del token si recibe un 401
+   *
+   * @param {string} url - URL completa a consultar
+   * @param {Object} options - Opciones de fetch (method, body, headers, etc.)
+   * @returns {Promise<Response>} - Response de fetch
+   */
+  async authenticatedFetch(url, options = {}) {
+    // 1. Obtener headers con token actual
+    let headers = await this.getAuthHeaders();
+
+    // 2. Combinar con headers de opciones
+    const requestOptions = {
+      ...options,
+      headers: {
+        ...headers,
+        ...options.headers,
+      },
+    };
+
+    // 3. Hacer petición
+    let response = await siigoFetch(url, requestOptions);
+
+    // 4. Si es 401 Unauthorized, intentar renovar token
+    if (response.status === 401) {
+      console.warn("Recibido 401 de Siigo. Renovando token y reintentando...");
+
+      // Invalidar token actual
+      this.invalidateToken();
+
+      // Obtener nuevos headers (forzará nuevo token)
+      headers = await this.getAuthHeaders();
+
+      // Actualizar headers en opciones
+      requestOptions.headers = {
+        ...headers,
+        ...options.headers,
+      };
+
+      // Reintentar petición
+      response = await siigoFetch(url, requestOptions);
+    }
+
+    return response;
+  },
+
+  /**
    * Obtiene headers de autenticación para requests
    */
   async getAuthHeaders() {
