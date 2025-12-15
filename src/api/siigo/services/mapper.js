@@ -624,7 +624,9 @@ module.exports = ({ strapi }) => ({
       person_type: isCompany ? "Company" : "Person",
       id_type: customer.identificationType === "NIT" ? "31" : "13",
       identification: customer.identification,
-      name: !isCompany ? [customer.name, customer.lastName] : customer.name,
+      name: !isCompany
+        ? [customer.name, customer.lastName].filter(Boolean)
+        : [customer.name],
       active: customer.isActive,
       fiscal_responsibilities: [{ code: "R-99-PN" }],
     };
