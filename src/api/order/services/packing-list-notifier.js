@@ -50,9 +50,10 @@ module.exports = ({ strapi }) => ({
 
         // Verificar si tiene facturas (necesario para enviar)
         // Usamos la función helper existente
-        const hasSales = order.type === "sale" || order.type === "partial-invoice";
+        const hasSales =
+          order.type === "sale" || order.type === "partial-invoice";
         if (!hasSales) continue;
-        
+
         // Intentar enviar
         try {
           const sent = await this.sendPackingListToSeller(order.id);
@@ -60,14 +61,20 @@ module.exports = ({ strapi }) => ({
             processedCount++;
           }
         } catch (err) {
-          logger.error(`Cron: Error procesando orden ${order.code}: ${err.message}`);
+          logger.error(
+            `Cron: Error procesando orden ${order.code}: ${err.message}`
+          );
         }
       }
 
       if (processedCount > 0) {
-        logger.info(`Cron: Enviadas ${processedCount} listas de empaque pendientes.`);
+        logger.info(
+          `Cron: Enviadas ${processedCount} listas de empaque pendientes.`
+        );
       } else {
-        logger.info("Cron: No se enviaron listas de empaque en esta ejecución.");
+        logger.info(
+          "Cron: No se enviaron listas de empaque en esta ejecución."
+        );
       }
     } catch (error) {
       logger.error("Error en cron de packing lists:", error.message);
@@ -89,32 +96,47 @@ module.exports = ({ strapi }) => ({
       const hasInvoices = hasInvoiceTypeA(order) || hasInvoiceTypeB(order);
 
       if (!hasInvoices) {
-        logger.warn(`Cron: Orden ${order.code} omitida - No tiene facturas (A/B) registradas aún.`);
+        logger.warn(
+          `Cron: Orden ${order.code} omitida - No tiene facturas (A/B) registradas aún.`
+        );
         return false;
       }
 
       const sellerInfo = extractSellerInfo(order);
       if (!sellerInfo) {
-        logger.warn(`Cron: Orden ${order.code} omitida - No se encontró información del seller (Check populate).`);
+        logger.warn(
+          `Cron: Orden ${order.code} omitida - No se encontró información del seller (Check populate).`
+        );
         return false;
       }
 
       if (!sellerInfo.email) {
-        logger.warn(`Cron: Orden ${order.code} omitida - El seller ${sellerInfo.name} no tiene email.`);
+        logger.warn(
+          `Cron: Orden ${order.code} omitida - El seller ${sellerInfo.name} no tiene email.`
+        );
         return false;
       }
 
       // Verificar DE NUEVO si ya tiene el adjunto (por seguridad de concurrencia)
-      const alreadyHasIt = order.attachments?.some(file => file.name.startsWith("LE ") || file.caption?.includes("Packing list"));
+      const alreadyHasIt = order.attachments?.some(
+        (file) =>
+          file.name.startsWith("LE ") || file.caption?.includes("Packing list")
+      );
       if (alreadyHasIt) {
-          logger.info(`Cron: Orden ${order.code} omitida - Ya tiene lista de empaque.`);
-          return false;
+        logger.info(
+          `Cron: Orden ${order.code} omitida - Ya tiene lista de empaque.`
+        );
+        return false;
       }
 
+      logger.info(`Cron: Generando PDF para orden ${order.code}...`);
       const { buffer } = await generatePackingListPDF(order);
       const finalFileName = buildPackingListFileName(order);
+
+      logger.info(`Cron: Subiendo PDF para orden ${order.code}...`);
       const uploadedFile = await this._uploadPdf(buffer, finalFileName, order);
 
+      logger.info(`Cron: Obteniendo facturas para orden ${order.code}...`);
       const invoiceAttachments = await this._buildInvoiceAttachments(order);
       const attachments = [
         {
@@ -127,6 +149,9 @@ module.exports = ({ strapi }) => ({
 
       const emailSubject = buildEmailSubject(order);
 
+      logger.info(
+        `Cron: Enviando email a ${sellerInfo.email} para orden ${order.code}...`
+      );
       await this._sendEmailWithAttachment({
         to: sellerInfo.email,
         sellerName: sellerInfo.name,
@@ -135,6 +160,7 @@ module.exports = ({ strapi }) => ({
         attachments,
       });
 
+      logger.info(`Cron: Vinculando adjunto a orden ${order.code}...`);
       await this._linkAttachmentToOrder(orderId, uploadedFile.id, order);
 
       logger.info("Packing list enviada por correo", {
@@ -142,7 +168,7 @@ module.exports = ({ strapi }) => ({
         sellerId: sellerInfo.id,
         email: sellerInfo.email,
       });
-      
+
       return true;
     } catch (error) {
       logger.error("No se pudo enviar la lista de empaque por correo", {

@@ -44,13 +44,14 @@ module.exports = ({ strapi }) => ({
       }
 
       const authService = strapi.service("api::siigo.auth");
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await siigoFetch(`${apiUrl}/v1/taxes`, {
-        method: "GET",
-        headers,
-      });
+      const response = await authService.authenticatedFetch(
+        `${apiUrl}/v1/taxes`,
+        {
+          method: "GET",
+        }
+      );
 
       if (!response.ok) {
         throw new Error(
@@ -117,13 +118,9 @@ module.exports = ({ strapi }) => ({
               parseFloat(existingTax.amount) !== parseFloat(taxData.amount);
 
             if (hasChanges) {
-              await strapi.entityService.update(
-                TAX_SERVICE,
-                existingTax.id,
-                {
-                  data: taxData,
-                }
-              );
+              await strapi.entityService.update(TAX_SERVICE, existingTax.id, {
+                data: taxData,
+              });
               updated++;
               console.log(`Tax actualizado: ${taxData.name}`);
             } else {
@@ -157,10 +154,7 @@ module.exports = ({ strapi }) => ({
       console.log(result.message);
       return result;
     } catch (error) {
-      console.error(
-        "Error al sincronizar taxes desde Siigo:",
-        error.message
-      );
+      console.error("Error al sincronizar taxes desde Siigo:", error.message);
       throw new Error(`Error en sincronización de taxes: ${error.message}`);
     }
   },
@@ -209,10 +203,7 @@ module.exports = ({ strapi }) => ({
 
       return localTaxIds;
     } catch (error) {
-      console.error(
-        "Error al mapear siigoTaxIds a local:",
-        error.message
-      );
+      console.error("Error al mapear siigoTaxIds a local:", error.message);
       return [];
     }
   },
@@ -237,10 +228,7 @@ module.exports = ({ strapi }) => ({
         .filter((tax) => tax.siigoCode)
         .map((tax) => parseInt(tax.siigoCode));
     } catch (error) {
-      console.error(
-        "Error al mapear localTaxIds a Siigo:",
-        error.message
-      );
+      console.error("Error al mapear localTaxIds a Siigo:", error.message);
       return [];
     }
   },

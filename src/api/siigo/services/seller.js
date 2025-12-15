@@ -41,13 +41,14 @@ module.exports = ({ strapi }) => ({
       }
 
       const authService = strapi.service("api::siigo.auth");
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await siigoFetch(`${apiUrl}/v1/users`, {
-        method: "GET",
-        headers,
-      });
+      const response = await authService.authenticatedFetch(
+        `${apiUrl}/v1/users`,
+        {
+          method: "GET",
+        }
+      );
 
       if (!response.ok) {
         throw new Error(
@@ -89,13 +90,14 @@ module.exports = ({ strapi }) => ({
       }
 
       const authService = strapi.service("api::siigo.auth");
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await siigoFetch(`${apiUrl}/v1/users/${sellerId}`, {
-        method: "GET",
-        headers,
-      });
+      const response = await authService.authenticatedFetch(
+        `${apiUrl}/v1/users/${sellerId}`,
+        {
+          method: "GET",
+        }
+      );
 
       if (!response.ok) {
         throw new Error(
@@ -112,9 +114,7 @@ module.exports = ({ strapi }) => ({
         `Error al obtener seller ${sellerId} desde Siigo:`,
         error.message
       );
-      throw new Error(
-        `Error al consultar seller en Siigo: ${error.message}`
-      );
+      throw new Error(`Error al consultar seller en Siigo: ${error.message}`);
     }
   },
 
@@ -241,10 +241,7 @@ module.exports = ({ strapi }) => ({
       console.log(result.message);
       return result;
     } catch (error) {
-      console.error(
-        "Error al sincronizar sellers desde Siigo:",
-        error.message
-      );
+      console.error("Error al sincronizar sellers desde Siigo:", error.message);
       throw new Error(`Error en sincronización de sellers: ${error.message}`);
     }
   },

@@ -207,37 +207,25 @@ module.exports = ({ strapi }) => ({
    * @returns {Object} - Respuesta de Siigo con la factura creada
    */
   async _sendInvoiceToSiigo(invoiceData, apiUrl, authService, retryCount = 0) {
-    const headers = await authService.getAuthHeaders();
+    // 6.2 Recurse to handle token refresh if needed (though authenticatedFetch handles 401, we might keep this for other retries)
+    // Actually, since we are moving to authenticatedFetch which handles 401, we can simplify this.
+    // However, the original code had 401 handling inside _sendInvoiceToSiigo with recursion.
+    // authenticatedFetch already does the token refresh.
+    // But we need to handle the specific retry logic for 400 errors (rounding issues).
 
-    let response = await siigoFetch(`${apiUrl}/v1/invoices`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(invoiceData),
-    });
+    let response = await authService.authenticatedFetch(
+      `${apiUrl}/v1/invoices`,
+      {
+        method: "POST",
+        body: JSON.stringify(invoiceData),
+      }
+    );
 
     if (!response.ok) {
       const errorData = await response.text();
       console.error("Error de Siigo:", errorData);
 
-      // Si es error 401, renovar token e intentar de nuevo
-      if (response.status === 401) {
-        console.log("Token expirado, renovando...");
-        authService.invalidateToken();
-        const newHeaders = await authService.getAuthHeaders();
-
-        response = await siigoFetch(`${apiUrl}/v1/invoices`, {
-          method: "POST",
-          headers: newHeaders,
-          body: JSON.stringify(invoiceData),
-        });
-
-        if (!response.ok) {
-          const retryError = await response.text();
-          throw new Error(
-            `Error HTTP ${response.status} después de renovar token: ${retryError}`
-          );
-        }
-      } else if (response.status === 400 && retryCount < 1) {
+      if (response.status === 400 && retryCount < 1) {
         // Lógica de reintento para errores de totales (redondeo)
         console.log(
           "Error 400 recibido. Intentando extraer valor correcto para reintento..."
@@ -309,14 +297,12 @@ module.exports = ({ strapi }) => ({
   async getInvoice(siigoInvoiceId) {
     try {
       const authService = strapi.service("api::siigo.auth");
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await siigoFetch(
+      const response = await authService.authenticatedFetch(
         `${apiUrl}/v1/invoices/${siigoInvoiceId}`,
         {
           method: "GET",
-          headers,
         }
       );
 
@@ -344,14 +330,12 @@ module.exports = ({ strapi }) => ({
   async downloadInvoicePdf(siigoInvoiceId) {
     try {
       const authService = strapi.service("api::siigo.auth");
-      const headers = await authService.getAuthHeaders();
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
 
-      const response = await siigoFetch(
+      const response = await authService.authenticatedFetch(
         `${apiUrl}/v1/invoices/${siigoInvoiceId}/pdf`,
         {
           method: "GET",
-          headers,
         }
       );
 
