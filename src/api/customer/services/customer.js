@@ -280,6 +280,10 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
   async update(id, data) {
     const { taxes = [], parties = [], prices = [], ...rest } = data;
 
+    // Filter out null values for email and lastName to avoid validation errors
+    if (rest.email === null) delete rest.email;
+    if (rest.lastName === null) delete rest.lastName;
+
     return strapi.db.transaction(async (trx) => {
       // Obtener customer actual con relaciones
       const currentCustomer = await strapi.entityService.findOne(
