@@ -130,11 +130,23 @@ module.exports = ({ strapi }) => ({
       }
 
       logger.info(`Cron: Generando PDF para orden ${order.code}...`);
+      const pdfStartTime = Date.now();
       const { buffer } = await generatePackingListPDF(order);
+      logger.info(
+        `Cron: PDF generado para orden ${order.code}. Duración: ${
+          Date.now() - pdfStartTime
+        }ms`
+      );
       const finalFileName = buildPackingListFileName(order);
 
       logger.info(`Cron: Subiendo PDF para orden ${order.code}...`);
+      const uploadStartTime = Date.now();
       const uploadedFile = await this._uploadPdf(buffer, finalFileName, order);
+      logger.info(
+        `Cron: PDF subido para orden ${order.code}. Duración: ${
+          Date.now() - uploadStartTime
+        }ms`
+      );
 
       logger.info(`Cron: Obteniendo facturas para orden ${order.code}...`);
       const invoiceAttachments = await this._buildInvoiceAttachments(order);
@@ -150,8 +162,9 @@ module.exports = ({ strapi }) => ({
       const emailSubject = buildEmailSubject(order);
 
       logger.info(
-        `Cron: Enviando email a ${sellerInfo.email} para orden ${order.code}...`
+        `Cron: Enviando email a ${sellerInfo.email} para orden ${order.code}. Inicio de envío...`
       );
+      const emailStartTime = Date.now();
       await this._sendEmailWithAttachment({
         to: sellerInfo.email,
         sellerName: sellerInfo.name,
@@ -159,6 +172,10 @@ module.exports = ({ strapi }) => ({
         order,
         attachments,
       });
+      const emailDuration = Date.now() - emailStartTime;
+      logger.info(
+        `Cron: Email enviado a ${sellerInfo.email} para orden ${order.code}. Duración: ${emailDuration}ms`
+      );
 
       logger.info(`Cron: Vinculando adjunto a orden ${order.code}...`);
       await this._linkAttachmentToOrder(orderId, uploadedFile.id, order);
@@ -278,7 +295,13 @@ module.exports = ({ strapi }) => ({
       port,
       secure,
       auth: user && pass ? { user, pass } : undefined,
+      connectionTimeout: 10000, // 10 seconds
+      socketTimeout: 20000, // 20 seconds
     });
+
+    logger.info(
+      `Cron: Configurando transporte SMTP: Host=${host}, Port=${port}, Secure=${secure}, User=${user}, To=${to}`
+    );
 
     const greeting = sellerName ? `Hola ${sellerName},` : "Hola,";
     const text = `${greeting}
