@@ -80,59 +80,128 @@ module.exports = ({ strapi }) => ({
         customer
       );
 
-      // Calcular el subTotal de la factura desde los items
-      // IMPORTANTE: Redondear cada línea a 2 decimales para coincidir con el cálculo de Siigo
-      let invoiceSubtotal = items.reduce(
-        (acc, item) => acc + Math.round(item.price * item.quantity * 100) / 100,
-        0
-      );
-      invoiceSubtotal = Math.round(invoiceSubtotal * 100) / 100;
-
-      // Aplicar impuestos a nivel de producto calculados individualmente POR ÍTEM
-      // Siigo calcula: Suma(Redondeo(PrecioItem * Cantidad * TasaImpuesto))
+      // Calcular totales de la factura
+      let invoiceSubtotal = 0;
       let invoiceTaxes = 0;
+      let invoiceTotalBeforeRetentions = 0;
 
+      // [NUEVO] Validar taxes de tipo 'product-depending-subtotal'
+      // Primero calculamos un subtotal preliminar para validar la condición
+      let preliminarySubtotal = 0;
       for (const item of items) {
-        if (item.taxes && item.taxes.length > 0) {
-          // FIX: Usar el subtotal redondeado como base para el cálculo de impuestos
-          // Esto asegura consistencia con invoiceSubtotal y el motor de Siigo
-          const itemSubtotal =
-            Math.round(item.price * item.quantity * 100) / 100;
+        if (item.taxed_price) {
+          // Si tiene impuesto incluido (IVA 19%), la base es ~ precio / 1.19
+          preliminarySubtotal += (item.taxed_price / 1.19) * item.quantity;
+        } else {
+          preliminarySubtotal += item.price * item.quantity;
+        }
+      }
 
-          for (const itemTax of item.taxes) {
-            // Buscar la definición del impuesto en customer.taxes para obtener la tasa
-            const taxDef = customer.taxes.find(
-              (t) => parseInt(t.siigoCode) === itemTax.id
-            );
+      if (customer && customer.taxes && customer.taxes.length > 0) {
+        const subtotalDependentTaxes = [];
 
-            if (taxDef) {
-              const taxRate = this._getEffectiveTaxRate(taxDef);
-              // Calculamos el impuesto para este ítem y lo redondeamos
-              const itemTaxAmount =
-                Math.round(itemSubtotal * taxRate * 100) / 100;
+        for (const tax of customer.taxes) {
+          if (
+            tax.applicationType === "product-depending-subtotal" &&
+            tax.siigoCode
+          ) {
+            let shouldApply = true;
+            // Verificar condición y threshold con el subtotal preliminar
+            if (tax.treshold && tax.treshold > 0 && tax.tresholdContidion) {
+              shouldApply = false;
+              switch (tax.tresholdContidion) {
+                case "greaterThan":
+                  shouldApply = preliminarySubtotal > tax.treshold;
+                  break;
+                case "lessThan":
+                  shouldApply = preliminarySubtotal < tax.treshold;
+                  break;
+                case "greaterThanOrEqualTo":
+                  shouldApply = preliminarySubtotal >= tax.treshold;
+                  break;
+                case "lessThanOrEqualTo":
+                  shouldApply = preliminarySubtotal <= tax.treshold;
+                  break;
+              }
+            }
 
-              // Si es decrement, resta; si es increment (default), suma
-              if (taxDef.use === "decrement") {
-                invoiceTaxes -= itemTaxAmount;
-              } else {
-                invoiceTaxes += itemTaxAmount;
+            if (shouldApply) {
+              subtotalDependentTaxes.push({
+                id: parseInt(tax.siigoCode),
+              });
+            }
+          }
+        }
+
+        if (subtotalDependentTaxes.length > 0) {
+          for (const item of items) {
+            if (!item.taxes) item.taxes = [];
+            for (const newTax of subtotalDependentTaxes) {
+              if (!item.taxes.find((t) => t.id === newTax.id)) {
+                item.taxes.push(newTax);
               }
             }
           }
         }
       }
+
+      // Cálculo final de totales recorriendo items
+      for (const item of items) {
+        if (item.taxed_price) {
+          // Caso: Precio con IVA incluido (taxed_price)
+          // El total de la línea es exactamente quantity * taxed_price (respetando precisión)
+          const lineTotal = item.taxed_price * item.quantity;
+
+          // Calculamos base inversa para reportes y retenciones (asumiendo IVA 19%)
+          // Siigo hará esto internamente, pero nosotros lo necesitamos para invoiceSubtotal
+          const lineBase = lineTotal / 1.19;
+
+          invoiceSubtotal += lineBase;
+          invoiceTotalBeforeRetentions += lineTotal;
+
+          // La diferencia es el impuesto implícito en taxed_price
+          invoiceTaxes += lineTotal - lineBase;
+        } else {
+          // Caso: Precio base sin IVA (price)
+          const lineBase = item.price * item.quantity;
+          invoiceSubtotal += lineBase;
+
+          let lineTaxes = 0;
+          if (item.taxes && item.taxes.length > 0) {
+            // Calcular impuestos adicionales
+            for (const itemTax of item.taxes) {
+              const taxDef = customer.taxes.find(
+                (t) => parseInt(t.siigoCode) === itemTax.id
+              );
+              if (taxDef) {
+                const rate = this._getEffectiveTaxRate(taxDef);
+                const taxAmount = lineBase * rate;
+                if (taxDef.use === "decrement") {
+                  lineTaxes -= taxAmount;
+                } else {
+                  lineTaxes += taxAmount;
+                }
+              }
+            }
+          }
+          invoiceTaxes += lineTaxes;
+          invoiceTotalBeforeRetentions += lineBase + lineTaxes;
+        }
+      }
+
+      // Redondeos finales para visualización y consistencia
+      invoiceSubtotal = Math.round(invoiceSubtotal * 100) / 100;
       invoiceTaxes = Math.round(invoiceTaxes * 100) / 100;
 
       // Calcular retenciones basadas en el subtotal
       const retentions = this.getSubtotalTaxes(invoiceSubtotal, customer);
 
-      // Calcular el efecto monetario de las retenciones de subtotal
       let retentionsAmount = 0;
       if (customer?.taxes?.length > 0) {
+        // Lógica de cálculo de retenciones (ya existente, mantenida pero usando el nuevo invoiceSubtotal)
         for (const tax of customer.taxes) {
-          // Solo procesar taxes de tipo "subtotal" que apliquen
           if (tax.applicationType === "subtotal" && tax.siigoCode) {
-            // Verificar si aplica según threshold
+            // ...re-validación de threshold con el subtotal final redondeado...
             let shouldApply = true;
             if (tax.treshold && tax.treshold > 0 && tax.tresholdContidion) {
               switch (tax.tresholdContidion) {
@@ -150,40 +219,28 @@ module.exports = ({ strapi }) => ({
                   break;
               }
             }
-
             if (shouldApply) {
-              const taxAmount = this._getEffectiveTaxRate(tax);
-              const calculatedTax = invoiceSubtotal * taxAmount;
-              const roundedCalculatedTax =
-                Math.round(calculatedTax * 100) / 100;
-
-              // Si es decrement, resta; si es increment, suma
-              if (tax.use === "decrement") {
-                retentionsAmount -= roundedCalculatedTax;
-              } else {
-                retentionsAmount += roundedCalculatedTax;
-              }
+              const rate = this._getEffectiveTaxRate(tax);
+              const val = invoiceSubtotal * rate;
+              const roundedVal = Math.round(val * 100) / 100;
+              if (tax.use === "decrement") retentionsAmount -= roundedVal;
+              else retentionsAmount += roundedVal;
             }
           }
         }
       }
-
-      // Asegurar que retentionsAmount esté redondeado (por si acaso)
       retentionsAmount = Math.round(retentionsAmount * 100) / 100;
 
-      // Calcular total final: subtotal + taxes de producto + taxes/retenciones de subtotal
+      // Total final
       const invoiceTotal =
-        Math.round((invoiceSubtotal + invoiceTaxes + retentionsAmount) * 100) /
+        Math.round((invoiceTotalBeforeRetentions + retentionsAmount) * 100) /
         100;
 
-      // Log para debugging
-      console.log("=== Cálculo de factura DETALLADO ===");
-      console.log(`Subtotal (suma de items redondeados): ${invoiceSubtotal}`);
-      console.log(
-        `Impuestos producto (suma de impuestos redondeados): ${invoiceTaxes}`
-      );
-      console.log(`Retenciones/Taxes subtotal: ${retentionsAmount}`);
-      console.log(`Total factura calculado: ${invoiceTotal}`);
+      console.log("=== Cálculo de factura DETALLADO (V2 Taxed Price) ===");
+      console.log(`Subtotal: ${invoiceSubtotal}`);
+      console.log(`Impuestos (aprox/calc): ${invoiceTaxes}`);
+      console.log(`Retenciones: ${retentionsAmount}`);
+      console.log(`Total a pagar: ${invoiceTotal}`);
 
       // Log de items para debug profundo
       console.log("--- Detalle Items ---");
@@ -272,23 +329,36 @@ module.exports = ({ strapi }) => ({
       // Calcular precio base (sin IVA si viene incluido)
       let basePrice = parseFloat(orderProduct.price);
       const originalPrice = basePrice;
-      // Si el precio incluye IVA, dividir por 1.19 para obtener el precio base
+      let taxedPrice = undefined;
+
+      // Si el precio incluye IVA, calculamos base para 'price' y enviamos 'taxed_price'
       if (orderProduct.ivaIncluded === true) {
-        basePrice = basePrice / 1.19;
+        // Calcular base price con hasta 6 decimales para minimizar errores de redondeo
+        // 14500 / 1.19 = 12184.873949... -> 12184.873950
+        basePrice = Number((originalPrice / 1.19).toFixed(6));
+        taxedPrice = originalPrice;
+
         console.log(
-          `Producto ${product.code}: Precio con IVA ${originalPrice} → Precio base ${basePrice}`
+          `Producto ${product.code}: IVA incluido via taxed_price. Base (6 dec): ${basePrice}, Taxed: ${taxedPrice}`
         );
+      } else {
+        // Lógica estándar para precios sin IVA
+        // Redondear a 2 decimales para consistencia
+        basePrice = Math.round(basePrice * 100) / 100;
       }
-      // Redondear a 2 decimales para consistencia
-      basePrice = Math.round(basePrice * 100) / 100;
+
       // Obtener taxes del producto/cliente
       const taxes = this.getProductTaxes(orderProduct, customerForInvoice);
       const item = {
         code: product.code || product.siigoId, // Usar siigoId como código en la factura
         quantity: Math.round(quantityToInvoice * 100) / 100, // Redondear a 2 decimales
-        price: basePrice,
+        price: basePrice, // OBLIGATORIO: Precio base (sin impuestos)
         discount: 0, // Agregar lógica de descuento si aplica
       };
+
+      if (taxedPrice !== undefined) {
+        item.taxed_price = taxedPrice;
+      }
       // Agregar taxes si existen
       if (taxes.length > 0) {
         item.taxes = taxes;
