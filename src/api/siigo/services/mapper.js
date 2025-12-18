@@ -686,17 +686,18 @@ module.exports = ({ strapi }) => ({
    * @returns {Object} - Customer en formato Siigo
    */
   async mapCustomerToSiigo(customer) {
-    // Determinar si es persona o empresa basado en el nombre
-    const isCompany = customer.identificationType === "NIT" ? true : false;
+    // Determinar si es persona o empresa basado en el nombre o tipo de ID
+    const isCompany =
+      customer.identificationType === "NIT" || customer.isCompany === true;
 
     const siigoCustomer = {
       type: "Customer",
       person_type: isCompany ? "Company" : "Person",
       id_type: customer.identificationType === "NIT" ? "31" : "13",
       identification: customer.identification,
-      name: !isCompany
-        ? [customer.name, customer.lastName].filter(Boolean)
-        : [customer.name],
+      name: isCompany
+        ? [[customer.name, customer.lastName].filter(Boolean).join(" ")]
+        : [customer.name, customer.lastName].filter(Boolean),
       active: customer.isActive,
       fiscal_responsibilities: [{ code: "R-99-PN" }],
     };
