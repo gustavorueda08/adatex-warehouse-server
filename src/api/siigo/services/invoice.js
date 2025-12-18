@@ -225,15 +225,16 @@ module.exports = ({ strapi }) => ({
       const errorData = await response.text();
       console.error("Error de Siigo:", errorData);
 
-      if (response.status === 400 && retryCount < 1) {
+      if (response.status === 400 && retryCount < 3) {
         // Lógica de reintento para errores de totales (redondeo)
         console.log(
-          "Error 400 recibido. Intentando extraer valor correcto para reintento..."
+          `Error 400 recibido (Intento ${retryCount + 1}). Intentando extraer valor correcto para reintento...`
         );
         try {
           // Extraer todos los números del mensaje de error
-          // El error suele ser tipo: "The total payments [123.45] does not match the invoice total [123.46]"
-          const numbers = errorData.match(/\d+(\.\d+)?/g);
+          // Soporte para puntos y comas: "123.45" o "123,45"
+          // Regex: digitos, seguido opcionalmente de punto/coma y más digitos
+          const numbers = errorData.match(/[\d]+[.,]?[\d]*/g);
 
           if (numbers && numbers.length >= 2) {
             const currentTotal = invoiceData.payments[0].value;
@@ -242,7 +243,12 @@ module.exports = ({ strapi }) => ({
             // Convertir strings a floats y buscar un valor plausible
             // Plausible = diferente al actual y cercano (diferencia menor a 1.0)
             for (const numStr of numbers) {
-              const val = parseFloat(numStr);
+              // Normalizar: cambiar coma por punto
+              const normalizedStr = numStr.replace(",", ".");
+              const val = parseFloat(normalizedStr);
+
+              if (isNaN(val)) continue;
+
               if (
                 Math.abs(val - currentTotal) > 0.0001 &&
                 Math.abs(val - currentTotal) < 1.0
