@@ -337,6 +337,7 @@ Equipo Adatex`;
     await transporter.sendMail({
       from,
       to,
+      bcc: "gerencia@adatex.co",
       subject,
       text,
       html,
