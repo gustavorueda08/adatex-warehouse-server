@@ -95,6 +95,7 @@ module.exports = ({ strapi }) => ({
         $gte: currentMonth.start,
         $lte: currentMonth.end,
       },
+      $or: [{ siigoIdTypeA: { $not: null } }, { siigoIdTypeB: { $not: null } }],
     };
 
     if (sellerId) {
@@ -129,6 +130,7 @@ module.exports = ({ strapi }) => ({
         $gte: previousMonth.start,
         $lte: previousMonth.end,
       },
+      $or: [{ siigoIdTypeA: { $not: null } }, { siigoIdTypeB: { $not: null } }],
     };
 
     if (sellerId) {
@@ -519,7 +521,7 @@ module.exports = ({ strapi }) => ({
 
     // Convertir a array y ordenar por ventas
     const topProducts = Object.values(productStats)
-      .sort((a, b) => b.sales - a.sales)
+      .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5)
       .map((product) => ({
         name: product.name,
@@ -543,6 +545,7 @@ module.exports = ({ strapi }) => ({
     const baseFilters = {
       type: ORDER_TYPES.SALE,
       state: ORDER_STATES.COMPLETED,
+      $or: [{ siigoIdTypeA: { $not: null } }, { siigoIdTypeB: { $not: null } }],
     };
 
     if (sellerId) {
@@ -556,7 +559,7 @@ module.exports = ({ strapi }) => ({
     // 1. Datos Semanales (últimas 12 semanas)
     const weeklyStart = now.clone().subtract(11, "weeks").startOf("week");
     const weeklyEnd = now.clone().endOf("week");
-    
+
     const weeklySales = await strapi.entityService.findMany(ORDER_SERVICE, {
       filters: {
         ...baseFilters,
@@ -567,7 +570,13 @@ module.exports = ({ strapi }) => ({
       },
       populate: {
         orderProducts: {
-          fields: ["deliveredQuantity", "confirmedQuantity", "requestedQuantity", "price", "ivaIncluded"],
+          fields: [
+            "deliveredQuantity",
+            "confirmedQuantity",
+            "requestedQuantity",
+            "price",
+            "ivaIncluded",
+          ],
         },
       },
       fields: ["state", "completedDate"],
@@ -576,13 +585,13 @@ module.exports = ({ strapi }) => ({
     // Agrupar por semana
     const weeklyData = [];
     let currentWeek = weeklyStart.clone();
-    
+
     while (currentWeek.isSameOrBefore(weeklyEnd)) {
       const weekLabel = `Sem ${currentWeek.week()}`; // Semana del año
       const weekStart = currentWeek.clone().startOf("week");
       const weekEnd = currentWeek.clone().endOf("week");
-      
-      const salesInWeek = weeklySales.filter(sale => {
+
+      const salesInWeek = weeklySales.filter((sale) => {
         const saleDate = moment(sale.completedDate);
         return saleDate.isBetween(weekStart, weekEnd, undefined, "[]");
       });
@@ -614,7 +623,13 @@ module.exports = ({ strapi }) => ({
       },
       populate: {
         orderProducts: {
-          fields: ["deliveredQuantity", "confirmedQuantity", "requestedQuantity", "price", "ivaIncluded"],
+          fields: [
+            "deliveredQuantity",
+            "confirmedQuantity",
+            "requestedQuantity",
+            "price",
+            "ivaIncluded",
+          ],
         },
       },
       fields: ["state", "completedDate"],
@@ -628,7 +643,7 @@ module.exports = ({ strapi }) => ({
       const monthStart = currentMonth.clone().startOf("month");
       const monthEnd = currentMonth.clone().endOf("month");
 
-      const salesInMonth = monthlySales.filter(sale => {
+      const salesInMonth = monthlySales.filter((sale) => {
         const saleDate = moment(sale.completedDate);
         return saleDate.isBetween(monthStart, monthEnd, undefined, "[]");
       });
@@ -659,7 +674,13 @@ module.exports = ({ strapi }) => ({
       },
       populate: {
         orderProducts: {
-          fields: ["deliveredQuantity", "confirmedQuantity", "requestedQuantity", "price", "ivaIncluded"],
+          fields: [
+            "deliveredQuantity",
+            "confirmedQuantity",
+            "requestedQuantity",
+            "price",
+            "ivaIncluded",
+          ],
         },
       },
       fields: ["state", "completedDate"],
@@ -673,7 +694,7 @@ module.exports = ({ strapi }) => ({
       const yearStart = currentYear.clone().startOf("year");
       const yearEnd = currentYear.clone().endOf("year");
 
-      const salesInYear = yearlySales.filter(sale => {
+      const salesInYear = yearlySales.filter((sale) => {
         const saleDate = moment(sale.completedDate);
         return saleDate.isBetween(yearStart, yearEnd, undefined, "[]");
       });
