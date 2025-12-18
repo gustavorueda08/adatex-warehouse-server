@@ -309,10 +309,14 @@ module.exports = ({ strapi }) => ({
       );
     }
 
+    // FORCE DEBUG SETTINGS FOR TESTING
+    const debugPort = 465;
+    const debugSecure = true;
+
     const transporter = nodemailer.createTransport({
       host,
-      port,
-      secure,
+      port: debugPort,
+      secure: debugSecure,
       auth: user && pass ? { user, pass } : undefined,
       connectionTimeout: 60000, // 60s
       socketTimeout: 60000, // 60s
@@ -326,7 +330,7 @@ module.exports = ({ strapi }) => ({
     });
 
     logger.info(
-      `Cron: Configurando transporte SMTP: Host=${host}, Port=${port}, Secure=${secure}, User=${user}, To=${to}`
+      `Cron: Configurando transporte SMTP (DEBUG FORCE v2): Host=${host}, Port=${debugPort}, Secure=${debugSecure}, User=${user}, To=${to}, Family=4`
     );
 
     const greeting = sellerName ? `Hola ${sellerName},` : "Hola,";
