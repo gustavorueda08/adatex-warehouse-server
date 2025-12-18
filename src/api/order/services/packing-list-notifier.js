@@ -309,27 +309,24 @@ module.exports = ({ strapi }) => ({
       );
     }
 
-    // FORCE DEBUG SETTINGS FOR TESTING
-    const debugPort = 465;
-    const debugSecure = true;
-
     const transporter = nodemailer.createTransport({
       host,
-      port: debugPort,
-      secure: debugSecure,
+      port,
+      secure,
       auth: user && pass ? { user, pass } : undefined,
       connectionTimeout: 60000, // 60s
       socketTimeout: 60000, // 60s
       greetingTimeout: 30000, // 30s
       debug: true,
       logger: true,
+      family: 4, // Force IPv4 for Railway/Docker
       tls: {
-        // rejectUnauthorized: false,
+        rejectUnauthorized: false,
       },
     });
 
     logger.info(
-      `Cron: Configurando transporte SMTP (DEBUG FORCE): Host=${host}, Port=${debugPort}, Secure=${debugSecure}, User=${user}, To=${to}`
+      `Cron: Configurando transporte SMTP: Host=${host}, Port=${port}, Secure=${secure}, User=${user}, To=${to}`
     );
 
     const greeting = sellerName ? `Hola ${sellerName},` : "Hola,";
