@@ -33,7 +33,8 @@
       "enum": [
         "product",
         "subtotal",
-        "product-depending-subtotal"
+        "product-depending-subtotal",
+        "self-retention"
       ]
     },
     "siigoCode": {

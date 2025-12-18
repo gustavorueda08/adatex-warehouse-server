@@ -336,7 +336,8 @@ module.exports = ({ strapi }) => ({
         // Calcular base price con hasta 6 decimales para minimizar errores de redondeo
         // 14500 / 1.19 = 12184.873949... -> 12184.873950
         basePrice = Number((originalPrice / 1.19).toFixed(6));
-        taxedPrice = originalPrice;
+        // Asegurar que el precio con impuestos tampoco exceda 6 decimales (por seguridad)
+        taxedPrice = Number(originalPrice.toFixed(6));
 
         console.log(
           `Producto ${product.code}: IVA incluido via taxed_price. Base (6 dec): ${basePrice}, Taxed: ${taxedPrice}`
