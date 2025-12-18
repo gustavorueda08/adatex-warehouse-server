@@ -534,8 +534,11 @@ module.exports = ({ strapi }) => ({
           continue;
         }
 
-        // Verificar si el tax aplica según su applicationType (debe ser "subtotal")
-        let shouldApply = tax.applicationType === "subtotal";
+        // Verificar si el tax aplica según su applicationType
+        // Soporte para 'subtotal' (retenciones normales) y 'self-retention' (autoretenciones informativas)
+        let shouldApply =
+          tax.applicationType === "subtotal" ||
+          tax.applicationType === "self-retention";
 
         // Si el tax tiene threshold configurado, verificar si se cumple la condición
         if (shouldApply && tax.treshold && tax.treshold > 0) {
