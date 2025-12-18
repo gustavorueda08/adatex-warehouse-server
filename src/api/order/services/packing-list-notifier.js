@@ -314,8 +314,14 @@ module.exports = ({ strapi }) => ({
       port,
       secure,
       auth: user && pass ? { user, pass } : undefined,
-      connectionTimeout: 30000, // 30 seconds
-      socketTimeout: 60000, // 60 seconds
+      connectionTimeout: 60000, // 60s
+      socketTimeout: 60000, // 60s
+      greetingTimeout: 30000, // 30s
+      debug: true, // Show verbose logs
+      logger: true, // Log to console
+      tls: {
+        rejectUnauthorized: false, // Help debug cert issues
+      },
     });
 
     logger.info(
