@@ -241,7 +241,10 @@ module.exports = ({ strapi }) => ({
             let newTotal = null;
 
             // Convertir strings a floats y buscar un valor plausible
-            // Plausible = diferente al actual y cercano (diferencia menor a 1.0)
+            // Mejor lógica: Buscar el candidato que sea NUMÉRICO, DIFERENTE al actual y NO sea el código de error (400)
+            let bestCandidate = null;
+            let minDiff = Infinity;
+
             for (const numStr of numbers) {
               // Normalizar: cambiar coma por punto
               const normalizedStr = numStr.replace(",", ".");
@@ -249,13 +252,28 @@ module.exports = ({ strapi }) => ({
 
               if (isNaN(val)) continue;
 
-              if (
-                Math.abs(val - currentTotal) > 0.0001 &&
-                Math.abs(val - currentTotal) < 1.0
-              ) {
-                newTotal = val;
-                break;
+              // Ignorar el status code (400) o valores irreales (ej: 0)
+              if (val === 400 || val === 0) continue;
+
+              const diff = Math.abs(val - currentTotal);
+
+              // Debe ser diferente al actual (si es igual, no arreglamos nada)
+              // Usamos un epsilon pequeño para comparar floats
+              if (diff < 0.0001) continue;
+
+              console.log(`[Siigo Retry] Candidato: ${val} (Diff: ${diff})`);
+
+              // Nos quedamos con el que tenga la menor diferencia (o simplemente el primero válido si confiamos en el mensaje)
+              // En el mensaje de error de Siigo, el valor esperado suele ser el único otro número decimal grande.
+              if (diff < minDiff) {
+                minDiff = diff;
+                bestCandidate = val;
               }
+            }
+
+            if (bestCandidate !== null) {
+              newTotal = bestCandidate;
+              // break; // No hacemos break para evaluar todos y encontrar el mejor
             }
 
             if (newTotal !== null) {
