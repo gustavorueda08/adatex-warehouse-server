@@ -354,6 +354,7 @@ class OutStrategy extends ItemMovementStrategy {
       reverse: true,
       update: {
         state: ITEM_STATES.AVAILABLE,
+        warehouse: order.sourceWarehouse?.id,
         order: order.id,
         orderProduct: orderProduct.id,
       },

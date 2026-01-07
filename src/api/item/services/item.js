@@ -366,6 +366,8 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           return {
             ...baseMovement,
             type: IN,
+            destinationWarehouse:
+              updatedItem.warehouse?.id || updatedItem.warehouse,
             reason:
               "Cambio de estado a disponible por cancelación de orden de salida",
           };

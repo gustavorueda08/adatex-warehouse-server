@@ -263,7 +263,11 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           ORDER_SERVICE,
           id,
           {
-            populate: ["orderProducts", "orderProducts.items"],
+            populate: [
+              "orderProducts",
+              "orderProducts.items",
+              "sourceWarehouse",
+            ],
             transacting: trx,
           }
         );

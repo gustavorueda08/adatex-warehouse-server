@@ -3,6 +3,7 @@
  */
 
 const ORDER_STATES = require("../../../utils/orderStates");
+const ORDER_TYPES = require("../../../utils/orderTypes");
 
 // Estados que permiten modificación de órdenes
 const EDITABLE_STATES = [ORDER_STATES.DRAFT, ORDER_STATES.CONFIRMED];
@@ -13,7 +14,10 @@ const EDITABLE_STATES = [ORDER_STATES.DRAFT, ORDER_STATES.CONFIRMED];
 const validateOrderIsEditable = (order) => {
   if (
     !EDITABLE_STATES.includes(order.state) &&
-    !(order.state === ORDER_STATES.COMPLETED && order.type === ORDER_TYPES.SALE)
+    !(
+      order.state === ORDER_STATES.COMPLETED &&
+      (order.type === ORDER_TYPES.SALE || order.type === ORDER_TYPES.OUT)
+    )
   ) {
     throw new Error(
       "Sólo las ordenes en borrador o confirmadas pueden ser modificadas"
@@ -140,7 +144,6 @@ const {
   WAREHOUSE_SERVICE,
   ORDER_SERVICE,
 } = require("../../../utils/services");
-const ORDER_TYPES = require("../../../utils/orderTypes");
 
 /**
  * Actualiza los productos de una orden
