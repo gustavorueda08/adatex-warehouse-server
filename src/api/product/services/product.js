@@ -25,7 +25,33 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
    * @param {Array} products
    * @returns {Array} products with inventory
    */
-  calculateInventoryForProducts(products, userPopulate = {}) {
+  calculateInventoryForProducts(products, options = {}) {
+    const {
+      userPopulate = {},
+      fromDate: fromDateParam,
+      toDate: toDateParam,
+    } = options;
+
+    // Normalizar fechas (ignorando hora para comparaciones de inclusión)
+    // Si no se envían, se asume rango abierto o lógica por defecto "hoy en adelante" para proyecciones
+    // Pero si el usuario no envía nada, ¿qué mostramos? Lo actual + proyecciones futuras?
+    // Asumiremos que si no hay fechas, es "current state" (sin proyecciones de required/production/arriving a futuro lejano, o TODO?)
+    // Para simplificar: Si no hay rango, mostramos CURRENT actual (reservas actuales, stock actual).
+    // Required/Production futuros dependen de fechas. Si no hay rango, ¿mostramos 0 o todo?
+    // Mostremos TODO lo pendiente si no hay filtro de fecha.
+
+    const fromDate = fromDateParam ? new Date(fromDateParam) : null;
+    const toDate = toDateParam ? new Date(toDateParam) : null;
+
+    // Helper para verificar rango
+    const isWithinRange = (dateStr) => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    };
+
     return products.map((product) => {
       const stats = {
         stock: 0,
@@ -36,14 +62,16 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         required: 0,
         available: 0,
         netAvailable: 0,
+        arriving: 0, // New Metric
       };
 
       // Calculate physical stock (stock, transit, defective, reserved from items)
+      // Esto siempre es "CURRENT" snapshot de los items físicos en DB.
       if (product.items?.length > 0) {
         product.items.forEach((item) => {
           const qty = Number(item.currentQuantity) || 0;
 
-          // Reserved: items with state 'reserved'
+          // Reserved: items with state 'reserved' (Existing physical reservations)
           if (item.state === "reserved") {
             stats.reserved += qty;
           }
@@ -61,40 +89,97 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         });
       }
 
-      // Calculate production and required from orderProducts
+      // Calculate future/projected metrics from orderProducts
       if (product.orderProducts?.length > 0) {
         product.orderProducts.forEach((op) => {
           const requested = Number(op.requestedQuantity) || 0;
+          const order = op.order;
 
-          // Production: items in warehouses of type 'production' (via order destination)
-          // "los production son todos los items que estén en warehause de tipo production, PERO, en este caso usamos los orderProducts con su requestedQuantity"
-          if (op.order?.destinationWarehouse?.type === "production") {
-            stats.production += requested;
+          if (!order) return;
+
+          // 1. ARRIVING: Purchase orders completed within range
+          // items que llegarán (Purchase -> Completed date en rango)
+          // OJO: Si la orden ya está completed, sus items YA deberían estar en stock/físico.
+          // Arriving suele ser "Incoming".
+          // Si la orden es 'purchase' y está en 'confirmed' o 'processing', es lo que esperamos.
+          // Si está 'completed', ya son items.
+          // Usaremos estimatedCompletedDate para filtrar.
+
+          if (
+            order.type === "purchase" &&
+            ["confirmed", "processing"].includes(order.state)
+          ) {
+            // ARRIVING logic
+            if (isWithinRange(order.estimatedCompletedDate)) {
+              stats.arriving += requested;
+            }
+
+            // PRODUCTION logic (Purchase orders in production phase?)
+            // Si definimos production como lo que está por llegar/producirse.
+            // En tu lógica anterior: op.order?.destinationWarehouse?.type === "production"
+            // Mantengamos esa lógica si aplica, o la basada en fechas.
+            // Asumiremos:
+            // - Arriving: Llega al final (CompletedDate)
+            // - Transit: En transito (TransitDate)
+            // - Production: En producción?
+
+            // Re-usemos tu lógica anterior combinada con fechas:
+
+            // PRODUCTION
+            // Si el destino es producción o fecha encaja
+            // (La definición exacta de "production" vs "arriving" puede solaparse si no se define estricto)
+            // Usaré la lógica solicitada:
+            // "production ... considered if estimatedTransitDate OR estimatedCompletedDate falls within range"
+            if (
+              isWithinRange(order.estimatedTransitDate) ||
+              isWithinRange(order.estimatedCompletedDate)
+            ) {
+              // Evitar doble conteo si ya está en Arriving?
+              // Usualmente metrics son vistas distintas.
+              // stats.production += requested;
+              // Pero cuidado con sumar al netAvailable duplicado.
+              // NetAvailable = stock + arriving - reserved - required. (Production/Transit son informativos o parte de Arriving?)
+              // En tu fórmula anterior: Net = stock + production + transit - reserved - required
+              // Ahora agregamos Arriving.
+              // Vamos a separar roles:
+              // Arriving: Lo que entra neto al stock disponible final.
+              // Production/Transit: Estados intermedios.
+              // Voy a sumar 'Arriving' al NetAvailable.
+              // 'Production' y 'Transit' serán informativos filtrados por fecha.
+
+              stats.production += requested;
+            }
+
+            // TRANSIT
+            if (isWithinRange(order.estimatedTransitDate)) {
+              stats.transit += requested;
+            }
           }
 
-          // Required: sale orders with no assigned items
-          // "required, lo cual sería todos los orderProducts que sean de ordenes de venta que aún no tengan items asignados"
-          if (
-            op.order?.type === "sale" &&
-            (!op.items || op.items.length === 0)
-          ) {
-            stats.required += requested;
+          // 2. REQUIRED: Sale orders (Demand)
+          // Sales with no items assigned yet (pure demand)
+          if (order.type === "sale" && (!op.items || op.items.length === 0)) {
+            if (isWithinRange(order.estimatedCompletedDate)) {
+              stats.required += requested;
+            }
           }
         });
       }
 
-      // Available: stock - reserved
+      // Available: stock - reserved (Current physical availability)
       stats.available = Math.max(0, stats.stock - stats.reserved);
 
-      // NetAvailable: stock + production + transit - reserved - required
-      stats.netAvailable =
-        stats.stock +
-        stats.production +
-        stats.transit -
-        stats.reserved -
-        stats.required;
+      // NetAvailable: Projected availability
+      // stock (actual) + arriving (futuro entrada) - reserved (físico actual) - required (futuro salida)
+      // * Nota: 'transit' y 'production' suelen ser subsets de 'arriving' o etapas previas.
+      // Si sumamos todo se duplica. Usaré 'arriving' como la fuente de verdad de entradas futuras en el rango.
+      // O si el usuario prefiere la fórmula vieja + arriving?
+      // "NetAvailable logic: Updated to stock + arriving - reserved - required for range projections." -> SEGÚN TU PREVIOUS SUMMARY.
 
-      // Cleanup: Remove inventory relations if not requested by user
+      stats.netAvailable =
+        stats.stock + stats.arriving - stats.reserved - stats.required;
+
+      // Cleanup
       const userAskedForItems =
         userPopulate.items || userPopulate["*"] || userPopulate.includeItems;
       const userAskedForOrderProducts =
@@ -107,6 +192,199 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
       return {
         ...productData,
+        inventory: stats,
+      };
+    });
+  },
+
+  /**
+   * Helper to calculate inventory for a list of products at a specific date
+   * @param {Array} products
+   * @param {string} date - ISO date string
+   * @returns {Promise<Array>} products with historical inventory
+   */
+  async calculateHistoricalInventory(products, date) {
+    const {
+      INVENTORY_MOVEMENT_SERVICE,
+      WAREHOUSE_SERVICE,
+    } = require("../../../utils/services");
+    const {
+      IN,
+      OUT,
+      TRANSFER,
+      ADJUSTMENT,
+      RESERVE,
+      UNRESERVE,
+      TRANSFORM,
+    } = require("../../../utils/inventoryMovementTypes");
+
+    // 1. Get all product IDs
+    const productIds = products.map((p) => p.id);
+
+    if (productIds.length === 0) return products;
+
+    // 2. Fetch all movements for these products up to the date
+    // We need to fetch movements for items belonging to these products
+    const movements = await strapi.entityService.findMany(
+      INVENTORY_MOVEMENT_SERVICE,
+      {
+        filters: {
+          item: {
+            product: {
+              id: { $in: productIds },
+            },
+          },
+          createdAt: { $lte: date },
+        },
+        populate: [
+          "item",
+          "item.product",
+          "sourceWarehouse",
+          "destinationWarehouse",
+          "order",
+        ],
+        sort: { createdAt: "asc" }, // Process in chronological order
+        limit: -1, // Fetch all
+      },
+    );
+
+    // 3. Fetch all warehouses to know their types
+    const warehouses = await strapi.entityService.findMany(
+      WAREHOUSE_SERVICE,
+      {},
+    );
+    const warehouseMap = warehouses.reduce((acc, w) => {
+      acc[w.id] = w;
+      return acc;
+    }, {});
+
+    // 4. Reconstruct Item States
+    const itemStates = {}; // itemId -> { quantity, warehouseId, state }
+
+    for (const mov of movements) {
+      if (!itemStates[mov.item.id]) {
+        itemStates[mov.item.id] = {
+          quantity: 0,
+          warehouseId: null,
+          state: "available", // Default start state
+          productId: mov.item.product.id,
+        };
+      }
+
+      const currentItemState = itemStates[mov.item.id];
+
+      // Update Quantity (balanceAfter is reliable for the quantity at that moment)
+      // If balanceAfter is null (should not happen for verified movements, but... Use logic if needed)
+      // Assuming balanceAfter is populated correctly.
+      if (mov.balanceAfter !== null && mov.balanceAfter !== undefined) {
+        currentItemState.quantity = Number(mov.balanceAfter);
+      } else {
+        // Fallback logic if balanceAfter is missing (e.g. legacy data)
+        currentItemState.quantity += Number(mov.quantity);
+      }
+
+      // Update Warehouse and State
+      switch (mov.type) {
+        case IN:
+        case TRANSFORM: // Transform IN creates new item in dest warehouse
+          if (mov.destinationWarehouse) {
+            currentItemState.warehouseId = mov.destinationWarehouse.id;
+          }
+          if (mov.type === IN || (mov.type === TRANSFORM && mov.quantity > 0)) {
+            currentItemState.state = "available";
+          }
+          break;
+
+        case OUT:
+          // Item leaves warehouse
+          // If pure OUT, warehouse might become null or it effectively disappears from stock
+          // But we keep tracking it.
+          // currentItemState.warehouseId = null; // Maybe?
+          if (mov.balanceAfter <= 0) {
+            // Effectively gone/consumed
+          }
+          // Mapping state based on order type?
+          // Usually OUT is final.
+          break;
+
+        case TRANSFER:
+          if (mov.destinationWarehouse) {
+            currentItemState.warehouseId = mov.destinationWarehouse.id;
+          }
+          break;
+
+        case RESERVE:
+          currentItemState.state = "reserved";
+          break;
+
+        case UNRESERVE:
+          currentItemState.state = "available";
+          break;
+
+        // ADJUSTMENT doesn't change warehouse usually, just quantity
+      }
+    }
+
+    // 5. Aggregate per Product
+    const productStats = {}; // productId -> stats object
+
+    productIds.forEach((pid) => {
+      productStats[pid] = {
+        stock: 0,
+        production: 0, // Hard to reconstruct without order history, maybe skip or assume 0
+        transit: 0,
+        defective: 0,
+        reserved: 0,
+        required: 0, // Hard to reconstruct
+        available: 0,
+        netAvailable: 0,
+      };
+    });
+
+    Object.values(itemStates).forEach((itemState) => {
+      const stats = productStats[itemState.productId];
+      if (!stats) return;
+
+      const qty = itemState.quantity;
+      if (qty <= 0) return; // Skip zero/negative quantity items
+
+      // Reserved
+      if (itemState.state === "reserved") {
+        stats.reserved += qty;
+      }
+
+      // Warehouse type stats
+      if (itemState.warehouseId && warehouseMap[itemState.warehouseId]) {
+        const wType = warehouseMap[itemState.warehouseId].type;
+        if (wType === "stock") {
+          stats.stock += qty;
+        } else if (wType === "transit") {
+          stats.transit += qty;
+        } else if (wType === "defective") {
+          stats.defective += qty;
+        }
+      }
+    });
+
+    // 6. Final Calculation & Return
+    return products.map((product) => {
+      const stats = productStats[product.id] || {
+        stock: 0,
+        production: 0,
+        transit: 0,
+        defective: 0,
+        reserved: 0,
+        required: 0,
+        available: 0,
+        netAvailable: 0,
+      };
+
+      // Recalculate derived fields
+      stats.available = Math.max(0, stats.stock - stats.reserved);
+      stats.netAvailable = stats.stock + stats.transit - stats.reserved; // Ignoring production/required for history as they are future/pending
+
+      return {
+        ...product,
         inventory: stats,
       };
     });
@@ -171,45 +449,33 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     }
 
     // 3. Merge user params with inventory requirements
-    // Extract pagination params if they exist in the nested format (Strapi v4 standard)
-    // Also extract 'collections' and 'includeItems' if present
     const {
       pagination: paginationParams,
       collections,
       includeItems,
+      date, // Extract date parameter (Historical)
+      fromDate, // New: Range start
+      toDate, // New: Range end
       ...otherParams
     } = params;
 
     // Pass includeItems to calculateInventoryForProducts via userPopulate
     if (includeItems === "true" || includeItems === true) {
       userPopulate.includeItems = true;
-
-      // Ensure we fetch necessary fields for the consumer if they asked for items
-      // We extend the default inventoryPopulate.items to include more fields if needed
-      // For now, inventoryPopulate.items already fetches what we need + populate warehouse
-      // We might want to ensure we fetch *all* fields or specific ones if includeItems is on.
-      // Let's assume the default inventoryPopulate structure is sufficient or we add to it.
-      // Actually, for "includeItems", the user likely wants full item details + warehouse.
-
       inventoryPopulate.items = {
         ...inventoryPopulate.items,
         populate: {
           ...inventoryPopulate.items.populate,
           warehouse: true, // Fetch full warehouse info
         },
-        // Remove fields restriction to get all item fields if includeItems is requested
         fields: undefined,
       };
     }
 
-    const { page, pageSize } = paginationParams || {};
-
     const finalParams = {
       ...otherParams,
-      // entityService.findPage expects page and pageSize at the root level
-      page: page || params.page,
-      pageSize: pageSize || params.pageSize,
-      // Default sort by name:asc if not provided
+      page: paginationParams?.page || params.page,
+      pageSize: paginationParams?.pageSize || params.pageSize,
       sort: params.sort || "name:asc",
       populate: {
         ...userPopulate,
@@ -227,7 +493,6 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       },
     };
 
-    // Handle custom 'collections' filter
     if (collections) {
       finalParams.filters = {
         ...(finalParams.filters || {}),
@@ -242,14 +507,25 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     // 4. Fetch data using entityService to handle pagination/filters
     const { results, pagination } = await strapi.entityService.findPage(
       SERVICE_UID,
-      finalParams
+      finalParams,
     );
 
-    // 5. Calculate inventory using helper
-    const productsWithInventory = this.calculateInventoryForProducts(
-      results,
-      userPopulate
-    );
+    // 5. Calculate inventory
+    let productsWithInventory;
+    if (date) {
+      // Use historical calculation
+      productsWithInventory = await this.calculateHistoricalInventory(
+        results,
+        date,
+      );
+    } else {
+      // Use current/live calculation with range projection options
+      productsWithInventory = this.calculateInventoryForProducts(results, {
+        userPopulate,
+        fromDate,
+        toDate,
+      });
+    }
 
     return {
       data: productsWithInventory,
@@ -319,7 +595,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     // So we will strip items/orderProducts by default to keep response clean.
     const productsWithInventory = this.calculateInventoryForProducts(
       results,
-      {}
+      {},
     );
 
     return productsWithInventory;

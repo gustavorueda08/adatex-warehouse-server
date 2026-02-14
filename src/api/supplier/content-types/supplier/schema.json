@@ -77,6 +77,12 @@
       "relation": "oneToMany",
       "target": "api::price.price",
       "mappedBy": "supplier"
+    },
+    "taxes": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::tax.tax",
+      "inversedBy": "suppliers"
     }
   }
 }

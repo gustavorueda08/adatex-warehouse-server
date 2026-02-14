@@ -11,9 +11,17 @@ module.exports = {
       handler: "customer.getConsignmentHistory",
     },
     {
+      method: "POST",
       path: "/customers/sync-from-siigo",
-      method: "GET",
       handler: "customer.syncFromSiigo",
+      config: {
+        timeout: 300000, // 5 minutos de timeout
+      },
+    },
+    {
+      method: "GET",
+      path: "/customers/:customerId/invoiceable-items",
+      handler: "customer.getInvoiceableItems",
     },
     {
       path: "/customers",

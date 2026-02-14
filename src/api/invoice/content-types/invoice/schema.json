@@ -1,0 +1,60 @@
+{
+  "kind": "collectionType",
+  "collectionName": "invoices",
+  "info": {
+    "singularName": "invoice",
+    "pluralName": "invoices",
+    "displayName": "Invoice",
+    "description": "Represents a Siigo Invoice"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "siigoId": {
+      "type": "uid",
+      "required": true,
+      "unique": true
+    },
+    "number": {
+      "type": "integer",
+      "required": true
+    },
+    "prefix": {
+      "type": "string"
+    },
+    "date": {
+      "type": "date"
+    },
+    "total": {
+      "type": "decimal"
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": [
+        "Electronic",
+        "System"
+      ],
+      "default": "Electronic"
+    },
+    "url": {
+      "type": "string"
+    },
+    "pdfUrl": {
+      "type": "string"
+    },
+    "customer": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::customer.customer",
+      "inversedBy": "invoices"
+    },
+    "orders": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::order.order",
+      "mappedBy": "invoices"
+    }
+  }
+}

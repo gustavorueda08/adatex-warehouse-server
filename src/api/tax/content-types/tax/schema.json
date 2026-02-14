@@ -22,10 +22,7 @@
     "type": {
       "type": "enumeration",
       "default": "percentage",
-      "enum": [
-        "percentage",
-        "fixed"
-      ]
+      "enum": ["percentage", "fixed"]
     },
     "applicationType": {
       "type": "enumeration",
@@ -59,13 +56,16 @@
       "target": "api::customer.customer",
       "mappedBy": "taxes"
     },
+    "suppliers": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::supplier.supplier",
+      "mappedBy": "taxes"
+    },
     "use": {
       "type": "enumeration",
       "default": "decrement",
-      "enum": [
-        "increment",
-        "decrement"
-      ]
+      "enum": ["increment", "decrement"]
     },
     "shouldAppear": {
       "type": "boolean",

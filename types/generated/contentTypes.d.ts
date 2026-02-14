@@ -441,6 +441,7 @@ export interface ApiCollectionCollection extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     description: Schema.Attribute.Text;
+    line: Schema.Attribute.Relation<'manyToOne', 'api::line.line'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -499,6 +500,7 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
   };
   attributes: {
     address: Schema.Attribute.Text;
+    companyName: Schema.Attribute.String;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -508,6 +510,7 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     identification: Schema.Attribute.UID & Schema.Attribute.Required;
     identificationType: Schema.Attribute.Enumeration<['CC', 'NIT']>;
     invoiceOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
+    invoices: Schema.Attribute.Relation<'oneToMany', 'api::invoice.invoice'>;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     isBlocked: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     isCompany: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
@@ -608,6 +611,47 @@ export interface ApiInventoryMovementInventoryMovement
   };
 }
 
+export interface ApiInvoiceInvoice extends Struct.CollectionTypeSchema {
+  collectionName: 'invoices';
+  info: {
+    description: 'Represents a Siigo Invoice';
+    displayName: 'Invoice';
+    pluralName: 'invoices';
+    singularName: 'invoice';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customer: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
+    date: Schema.Attribute.Date;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::invoice.invoice'
+    > &
+      Schema.Attribute.Private;
+    number: Schema.Attribute.Integer & Schema.Attribute.Required;
+    orders: Schema.Attribute.Relation<'manyToMany', 'api::order.order'>;
+    pdfUrl: Schema.Attribute.String;
+    prefix: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    siigoId: Schema.Attribute.UID &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    total: Schema.Attribute.Decimal;
+    type: Schema.Attribute.Enumeration<['Electronic', 'System']> &
+      Schema.Attribute.DefaultTo<'Electronic'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    url: Schema.Attribute.String;
+  };
+}
+
 export interface ApiItemItem extends Struct.CollectionTypeSchema {
   collectionName: 'items';
   info: {
@@ -692,6 +736,36 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiLineLine extends Struct.CollectionTypeSchema {
+  collectionName: 'lines';
+  info: {
+    displayName: 'Line';
+    pluralName: 'lines';
+    singularName: 'line';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    collections: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::collection.collection'
+    >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<'oneToMany', 'api::line.line'> &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiOrderProductOrderProduct
   extends Struct.CollectionTypeSchema {
   collectionName: 'order_products';
@@ -754,9 +828,6 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    actualDepositPaymentDate: Schema.Attribute.Date;
-    actualDispatchDate: Schema.Attribute.Date;
-    actualWarehouseDate: Schema.Attribute.Date;
     approvedBy: Schema.Attribute.Relation<
       'manyToOne',
       'api::barcode-mapping.barcode-mapping'
@@ -769,7 +840,6 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
       'manyToOne',
       'plugin::users-permissions.user'
     >;
-    cancelledDate: Schema.Attribute.DateTime;
     childOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
     code: Schema.Attribute.UID & Schema.Attribute.Required;
     completedDate: Schema.Attribute.DateTime;
@@ -799,9 +869,8 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
       'plugin::users-permissions.user'
     >;
     emitInvoice: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
-    estimatedDepositPaymentDate: Schema.Attribute.Date;
-    estimatedDispatchDate: Schema.Attribute.Date;
-    estimatedWarehouseDate: Schema.Attribute.Date;
+    estimatedCompletedDate: Schema.Attribute.Date;
+    estimatedTransitDate: Schema.Attribute.Date;
     generatedBy: Schema.Attribute.Relation<
       'manyToOne',
       'plugin::users-permissions.user'
@@ -809,6 +878,7 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     invoiceNumber: Schema.Attribute.UID;
     invoiceNumberTypeA: Schema.Attribute.UID;
     invoiceNumberTypeB: Schema.Attribute.UID;
+    invoices: Schema.Attribute.Relation<'manyToMany', 'api::invoice.invoice'>;
     items: Schema.Attribute.Relation<'manyToMany', 'api::item.item'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::order.order'> &
@@ -838,6 +908,7 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     supplier: Schema.Attribute.Relation<'manyToOne', 'api::supplier.supplier'>;
     trackingNumber: Schema.Attribute.String;
     transformationFactor: Schema.Attribute.Decimal;
+    transitDate: Schema.Attribute.Date;
     type: Schema.Attribute.Enumeration<
       [
         'in',
@@ -1023,6 +1094,7 @@ export interface ApiSupplierSupplier extends Struct.CollectionTypeSchema {
     products: Schema.Attribute.Relation<'manyToMany', 'api::product.product'>;
     publishedAt: Schema.Attribute.DateTime;
     siigoId: Schema.Attribute.UID;
+    taxes: Schema.Attribute.Relation<'manyToMany', 'api::tax.tax'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1059,6 +1131,10 @@ export interface ApiTaxTax extends Struct.CollectionTypeSchema {
     publishedAt: Schema.Attribute.DateTime;
     shouldAppear: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     siigoCode: Schema.Attribute.UID;
+    suppliers: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::supplier.supplier'
+    >;
     treshold: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     tresholdContidion: Schema.Attribute.Enumeration<
       ['greaterThan', 'lessThan', 'greaterThanOrEqualTo', 'lessThanOrEqualTo']
@@ -1700,7 +1776,9 @@ declare module '@strapi/strapi' {
       'api::configuration.configuration': ApiConfigurationConfiguration;
       'api::customer.customer': ApiCustomerCustomer;
       'api::inventory-movement.inventory-movement': ApiInventoryMovementInventoryMovement;
+      'api::invoice.invoice': ApiInvoiceInvoice;
       'api::item.item': ApiItemItem;
+      'api::line.line': ApiLineLine;
       'api::order-product.order-product': ApiOrderProductOrderProduct;
       'api::order.order': ApiOrderOrder;
       'api::price.price': ApiPricePrice;

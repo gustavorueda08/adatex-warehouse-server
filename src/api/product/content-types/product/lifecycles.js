@@ -13,7 +13,74 @@ module.exports = {
    */
   async afterCreate(event) {
     try {
-      const { result } = event;
+      const { result, params } = event;
+
+      // --- Logic: Automatic Collection Assignment ---
+      const hasCollections =
+        params.data.collections &&
+        Array.isArray(params.data.collections) &&
+        params.data.collections.length > 0;
+
+      if (!hasCollections && result.name) {
+        // Extract category name: "Piel de Durazno - 175" -> "Piel de Durazno"
+        // Split by " - " or " / "
+        const parts = result.name.split(/\s-\s|\s\/\s/);
+        const categoryName = parts[0] ? parts[0].trim() : null;
+
+        if (categoryName) {
+          try {
+            // Find existing collection
+            const collections = await strapi.entityService.findMany(
+              "api::collection.collection",
+              {
+                filters: { name: categoryName },
+                limit: 1,
+              },
+            );
+
+            let collectionId;
+
+            if (collections.length > 0) {
+              collectionId = collections[0].id;
+            } else {
+              // Create new collection
+              console.log(
+                `[Product Lifecycle] Creating new collection: "${categoryName}"`,
+              );
+              const newCollection = await strapi.entityService.create(
+                "api::collection.collection",
+                {
+                  data: { name: categoryName },
+                },
+              );
+              collectionId = newCollection.id;
+            }
+
+            // Update product with collection
+            if (collectionId) {
+              await strapi.entityService.update(
+                "api::product.product",
+                result.id,
+                {
+                  data: {
+                    collections: { connect: [collectionId] },
+                  },
+                },
+              );
+              console.log(
+                `[Product Lifecycle] Auto-assigned collection "${categoryName}" to product ${result.id}`,
+              );
+            }
+          } catch (err) {
+            console.error(
+              "[Product Lifecycle] Error assigning collection:",
+              err.message,
+            );
+          }
+        }
+      }
+      // ----------------------------------------------
+
       const productService = strapi.service("api::siigo.product");
 
       // Si ya tiene siigoId, significa que ya está sincronizado con Siigo
@@ -24,7 +91,7 @@ module.exports = {
       // Intentar buscar en Siigo por código primero
       if (result.code) {
         const productFromSiigo = await productService.searchInSiigoByCode(
-          result.code
+          result.code,
         );
 
         if (productFromSiigo) {
@@ -34,23 +101,20 @@ module.exports = {
             data: { siigoId: String(productFromSiigo.id) },
           });
           console.log(
-            `[Product Lifecycle] Product ${result.id} vinculado con Siigo ID ${productFromSiigo.id}`
+            `[Product Lifecycle] Product ${result.id} vinculado con Siigo ID ${productFromSiigo.id}`,
           );
           return;
         }
       } else {
         console.warn(
-          `[Product ${result.id}] No tiene code, se omite búsqueda en Siigo`
+          `[Product ${result.id}] No tiene code, se omite búsqueda en Siigo`,
         );
-        return; 
+        return;
       }
       // Si no existe, crear en Siigo
       await productService.createInSiigo(result.id);
     } catch (error) {
-      console.error(
-        "[Product Lifecycle] Error en afterCreate:",
-        error.message
-      );
+      console.error("[Product Lifecycle] Error en afterCreate:", error.message);
     }
   },
 
@@ -76,10 +140,7 @@ module.exports = {
         await productService.createInSiigo(result.id);
       }
     } catch (error) {
-      console.error(
-        "[Product Lifecycle] Error en afterUpdate:",
-        error.message
-      );
+      console.error("[Product Lifecycle] Error en afterUpdate:", error.message);
     }
   },
 
@@ -96,10 +157,7 @@ module.exports = {
         await productService.deleteInSiigo(result.id);
       }
     } catch (error) {
-      console.error(
-        "[Product Lifecycle] Error en afterDelete:",
-        error.message
-      );
+      console.error("[Product Lifecycle] Error en afterDelete:", error.message);
     }
   },
 };

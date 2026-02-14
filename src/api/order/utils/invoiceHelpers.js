@@ -91,7 +91,7 @@ async function findInvoiceableItemsByQuantity({
 
     const quantityToTake = Math.min(
       itemInfo.availableQuantity,
-      remainingQuantity
+      remainingQuantity,
     );
 
     selectedItems.push({
@@ -105,7 +105,7 @@ async function findInvoiceableItemsByQuantity({
 
   if (remainingQuantity > 0) {
     throw new Error(
-      `No hay suficiente inventario en remisión. Solicitado: ${quantity}, Disponible: ${quantity - remainingQuantity}`
+      `No hay suficiente inventario en remisión. Solicitado: ${quantity}, Disponible: ${quantity - remainingQuantity}`,
     );
   }
 
@@ -123,76 +123,126 @@ async function validatePartialInvoiceOrder(orderData, options = {}) {
   const { trx } = options;
   const errors = [];
 
-  // Verificar que tenga parentOrder
-  if (!orderData.parentOrder) {
-    errors.push(
-      "Las órdenes de tipo partial-invoice deben tener un parentOrder"
-    );
-    return { valid: false, errors };
-  }
-
-  // Obtener la orden padre
-  const parentOrder = await strapi.entityService.findOne(
-    ORDER_SERVICE,
-    orderData.parentOrder,
-    {
-      populate: [
-        "customer",
-        "orderProducts",
-        "orderProducts.items",
-        "orderProducts.product",
-      ],
-      transacting: trx,
+  // Validar que tenga customer
+  if (!orderData.customer) {
+    if (orderData.parentOrder) {
+      // Si tiene parentOrder pero no customer, se tomarán del parentOrder (lógica en service create),
+      // pero validamos que el parentOrder exista para asegurar consistencia.
+      // (Esta validación ya se hace abajo si hay parentOrder)
+    } else {
+      errors.push(
+        "Las órdenes de tipo partial-invoice deben tener un customer asociado",
+      );
+      // Retornamos de una vez porque sin cliente no podemos validar mucho más
+      return { valid: false, errors };
     }
-  );
-
-  if (!parentOrder) {
-    errors.push("La orden padre no existe");
-    return { valid: false, errors };
   }
 
-  // Validar que la orden padre sea de tipo sale
-  if (parentOrder.type !== ORDER_TYPES.SALE) {
-    errors.push("La orden padre debe ser de tipo 'sale'");
-  }
+  let parentOrder = null;
 
-  // Validar que la orden padre esté completada
-  if (parentOrder.state !== ORDER_STATES.COMPLETED) {
-    errors.push("La orden padre debe estar en estado 'completed'");
-  }
-
-  // Validar que la orden padre NO esté facturada (debe ser remisión)
-  if (parentOrder.siigoId) {
-    errors.push("La orden padre ya está facturada (tiene siigoId)");
-  }
-
-  // Validar que la orden padre NO tenga emitInvoice: true
-  // (si tiene emitInvoice: true, debería facturarse completa al completarse, no parcialmente)
-  if (parentOrder.emitInvoice === true) {
-    errors.push(
-      "La orden padre tiene emitInvoice: true, no se puede facturar parcialmente. Debe facturarse completa al completarse."
+  // Si tiene parentOrder, validamos las reglas antiguas (opcional)
+  if (orderData.parentOrder) {
+    parentOrder = await strapi.entityService.findOne(
+      ORDER_SERVICE,
+      orderData.parentOrder,
+      {
+        populate: [
+          "customer",
+          "orderProducts",
+          "orderProducts.items",
+          "orderProducts.product",
+        ],
+        transacting: trx,
+      },
     );
+
+    if (!parentOrder) {
+      errors.push("La orden padre no existe");
+    } else {
+      // Validar tipo y estado de la orden padre
+      if (parentOrder.type !== ORDER_TYPES.SALE) {
+        errors.push("La orden padre debe ser de tipo 'sale'");
+      }
+      if (parentOrder.state !== ORDER_STATES.COMPLETED) {
+        errors.push("La orden padre debe estar en estado 'completed'");
+      }
+      if (parentOrder.siigoId) {
+        errors.push("La orden padre ya está facturada (tiene siigoId)");
+      }
+      if (parentOrder.emitInvoice === true) {
+        errors.push(
+          "La orden padre tiene emitInvoice: true. Debe facturarse completa al completarse.",
+        );
+      }
+    }
   }
 
-  // Si se especifican items por ID, validar que pertenezcan a la orden padre
+  // Validar items si vienen en el payload
   if (orderData.products && Array.isArray(orderData.products)) {
-    for (const productData of orderData.products) {
-      if (productData.items && Array.isArray(productData.items)) {
-        for (const itemData of productData.items) {
-          if (itemData.id) {
-            // Buscar el item en la orden padre
-            const itemInParent = parentOrder.orderProducts
-              ?.flatMap((op) => op.items || [])
-              .find((item) => item.id === itemData.id);
+    const customerId = orderData.customer || parentOrder?.customer?.id;
 
-            if (!itemInParent) {
-              errors.push(
-                `El item ${itemData.id} no pertenece a la orden padre`
+    if (!customerId) {
+      errors.push("No se pudo determinar el cliente para validar los items");
+    } else {
+      for (const productData of orderData.products) {
+        if (productData.items && Array.isArray(productData.items)) {
+          for (const itemData of productData.items) {
+            if (itemData.id) {
+              // Verificar que el item exista y sea válido para facturar
+              const item = await strapi.entityService.findOne(
+                ITEM_SERVICE,
+                itemData.id,
+                {
+                  populate: ["orders", "orders.customer"], // Necesitamos ver las órdenes para confirmar el cliente
+                  transacting: trx,
+                },
               );
-            } else if (itemInParent.isInvoiced) {
-              errors.push(
-                `El item ${itemData.id} ya fue facturado previamente`
+
+              if (!item) {
+                errors.push(`El item ${itemData.id} no existe`);
+                continue;
+              }
+
+              if (item.isInvoiced) {
+                errors.push(
+                  `El item ${itemData.id} ya fue facturado previamente`,
+                );
+                continue;
+              }
+
+              if (item.state !== ITEM_STATES.SOLD) {
+                errors.push(
+                  `El item ${itemData.id} debe estar en estado 'sold' para facturarse`,
+                );
+                continue;
+              }
+
+              // Validar que el item pertenezca a alguna orden de este cliente
+              // Buscamos si alguna de las órdenes del item tiene el mismo cliente
+              const belongsToCustomer = item.orders?.some(
+                (o) => o.customer?.id === customerId,
               );
+
+              if (!belongsToCustomer) {
+                // Nota: Podría ser que la orden no tenga customer directo pero sea hija de una que sÍ,
+                // pero asumimos que las órdenes de venta (SALE) tienen customer.
+                // Si es un item antiguo, podría ser complicado.
+                // Relajamos un poco: si tenemos parentOrder, validamos contra esa.
+                if (parentOrder) {
+                  const inParent = parentOrder.orderProducts
+                    ?.flatMap((op) => op.items || [])
+                    .find((i) => i.id === item.id);
+                  if (!inParent) {
+                    errors.push(
+                      `El item ${itemData.id} no pertenece al cliente especificado (ni a la orden padre)`,
+                    );
+                  }
+                } else {
+                  errors.push(
+                    `El item ${itemData.id} no parece pertenecer a ninguna orden del cliente ${customerId}`,
+                  );
+                }
+              }
             }
           }
         }
@@ -203,7 +253,7 @@ async function validatePartialInvoiceOrder(orderData, options = {}) {
   return {
     valid: errors.length === 0,
     errors,
-    parentOrder,
+    parentOrder, // Se retorna por compatibilidad, puede ser null
   };
 }
 
@@ -251,14 +301,14 @@ async function getInvoiceableItemsFromOrder(orderId, options = {}) {
     if (!product) continue;
 
     const invoiceableItems = (orderProduct.items || []).filter(
-      (item) => item.state === ITEM_STATES.SOLD && !item.isInvoiced
+      (item) => item.state === ITEM_STATES.SOLD && !item.isInvoiced,
     );
 
     if (invoiceableItems.length === 0) continue;
 
     const totalQuantity = invoiceableItems.reduce(
       (sum, item) => sum + (item.currentQuantity || 0),
-      0
+      0,
     );
 
     productGroups[product.id] = {
@@ -296,7 +346,7 @@ async function getInvoiceableItemsFromOrder(orderId, options = {}) {
       totalProducts: Object.keys(productGroups).length,
       totalItems: Object.values(productGroups).reduce(
         (sum, pg) => sum + pg.itemCount,
-        0
+        0,
       ),
     },
   };
@@ -328,8 +378,8 @@ async function markItemsAsInvoiced(itemIds, options = {}) {
           warehouse: null, // Remover warehouse cuando se factura (salida definitiva)
         },
         transacting: trx,
-      })
-    )
+      }),
+    ),
   );
 }
 
@@ -355,8 +405,8 @@ async function unmarkItemsAsInvoiced(itemIds, options = {}) {
           invoicedDate: null,
         },
         transacting: trx,
-      })
-    )
+      }),
+    ),
   );
 }
 
@@ -377,7 +427,7 @@ async function splitOrderForInvoices(order) {
             Math.round(
               orderProduct.deliveredQuantity *
                 (orderProduct.invoicePercentage / 100) *
-                100
+                100,
             ) / 100,
         };
         const restOrderProduct = {
@@ -386,7 +436,7 @@ async function splitOrderForInvoices(order) {
             Math.round(
               (orderProduct.deliveredQuantity -
                 legalOrderProduct.deliveredQuantity) *
-                100
+                100,
             ) / 100,
         };
         acc.legalOrderProducts.push(legalOrderProduct);
@@ -396,7 +446,7 @@ async function splitOrderForInvoices(order) {
     {
       legalOrderProducts: [],
       orderProducts: [],
-    }
+    },
   );
   return [
     { ...order, orderProducts: splittedOrderProducts.legalOrderProducts },
@@ -425,17 +475,21 @@ function splitOrderProductsForDualInvoices(order) {
     const confirmedQty = orderProduct.confirmedQuantity || 0;
 
     // Calcular cantidad para factura tipo A (porcentaje especificado)
-    const typeAQuantity = Math.round((confirmedQty * invoicePercentage) / 100 * 100) / 100;
+    const typeAQuantity =
+      Math.round(((confirmedQty * invoicePercentage) / 100) * 100) / 100;
 
-    // Siempre agregar a tipo A (aunque sea con cantidad 0)
-    typeAProducts.push({
-      ...orderProduct,
-      confirmedQuantity: typeAQuantity,
-    });
+    // Solo agregar a tipo A si la cantidad es mayor a 0
+    if (typeAQuantity > 0) {
+      typeAProducts.push({
+        ...orderProduct,
+        confirmedQuantity: typeAQuantity,
+      });
+    }
 
     // Si el porcentaje es menor a 100%, calcular la cantidad restante para tipo B
     if (invoicePercentage < 100) {
-      const typeBQuantity = Math.round((confirmedQty - typeAQuantity) * 100) / 100;
+      const typeBQuantity =
+        Math.round((confirmedQty - typeAQuantity) * 100) / 100;
 
       typeBProducts.push({
         ...orderProduct,

@@ -150,7 +150,7 @@ const UpdateOrderProductSchema = z.object({
               currentQuantity: z.number(),
               state: ItemState,
             })
-            .catchall(z.any())
+            .catchall(z.any()),
         )
         .optional()
         .default(null),
@@ -180,6 +180,7 @@ const CreateOrderSchema = z
           items: z
             .array(
               z.object({
+                id: ID.optional().default(null),
                 product: ID.optional().default(null),
                 quantity: z.number(),
                 lot: z
@@ -202,7 +203,7 @@ const CreateOrderSchema = z
                   .default({}),
                 sourceItemId: ID.optional().default(null),
                 sourceQuantityConsumed: z.number().optional().default(null),
-              })
+              }),
             )
             .optional()
             .default([]),
@@ -212,7 +213,7 @@ const CreateOrderSchema = z
             .optional()
             .default(null),
           name: z.string().optional().default(null),
-        })
+        }),
       )
       .optional()
       .default([]),
@@ -243,7 +244,7 @@ const UpdateOrderSchema = z.object({
             .optional()
             .default(null),
         })
-        .catchall(z.any())
+        .catchall(z.any()),
     )
     .optional()
     .default([]),

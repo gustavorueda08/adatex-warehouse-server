@@ -39,7 +39,7 @@ module.exports = ({ strapi }) => ({
       const validation = await mapperService.validateOrderForInvoicing(order);
       if (!validation.valid) {
         throw new Error(
-          `Orden no válida para facturación:\n- ${validation.errors.join("\n- ")}`
+          `Orden no válida para facturación:\n- ${validation.errors.join("\n- ")}`,
         );
       }
 
@@ -51,7 +51,7 @@ module.exports = ({ strapi }) => ({
         splitOrderProductsForDualInvoices(order);
 
       console.log(
-        `Orden ${order.code} - Necesita split: ${needsSplit ? "SÍ" : "NO"}`
+        `Orden ${order.code} - Necesita split: ${needsSplit ? "SÍ" : "NO"}`,
       );
       console.log(`  - Productos tipo A: ${typeAProducts.length}`);
       console.log(`  - Productos tipo B: ${typeBProducts.length}`);
@@ -61,28 +61,32 @@ module.exports = ({ strapi }) => ({
       let invoiceTypeB = null;
 
       // ========== CREAR FACTURA TIPO A (ELECTRÓNICA) ==========
-      try {
-        console.log("Creando factura tipo A (electrónica)...");
-        const orderTypeA = { ...order, orderProducts: typeAProducts };
-        const invoiceDataTypeA = await mapperService.mapOrderToInvoice(
-          orderTypeA,
-          28338
-        );
-        console.log(
-          "Datos factura tipo A:",
-          JSON.stringify(invoiceDataTypeA, null, 2)
-        );
-        invoiceTypeA = await this._sendInvoiceToSiigo(
-          invoiceDataTypeA,
-          apiUrl,
-          authService
-        );
-        console.log(`✓ Factura tipo A creada: ${invoiceTypeA.id}`);
-      } catch (error) {
-        console.error("Error al crear factura tipo A:", error.message);
-        throw new Error(
-          `Error al crear factura tipo A (electrónica): ${error.message}`
-        );
+      if (typeAProducts.length > 0) {
+        try {
+          console.log("Creando factura tipo A (electrónica)...");
+          const orderTypeA = { ...order, orderProducts: typeAProducts };
+          const invoiceDataTypeA = await mapperService.mapOrderToInvoice(
+            orderTypeA,
+            28338,
+          );
+          console.log(
+            "Datos factura tipo A:",
+            JSON.stringify(invoiceDataTypeA, null, 2),
+          );
+          invoiceTypeA = await this._sendInvoiceToSiigo(
+            invoiceDataTypeA,
+            apiUrl,
+            authService,
+          );
+          console.log(`✓ Factura tipo A creada: ${invoiceTypeA.id}`);
+        } catch (error) {
+          console.error("Error al crear factura tipo A:", error.message);
+          throw new Error(
+            `Error al crear factura tipo A (electrónica): ${error.message}`,
+          );
+        }
+      } else {
+        console.log("No hay productos para factura Tipo A (todo va a Tipo B)");
       }
 
       // ========== CREAR FACTURA TIPO B (NORMAL) SI ES NECESARIO ==========
@@ -91,60 +95,117 @@ module.exports = ({ strapi }) => ({
           console.log("Creando factura tipo B (normal)...");
           const orderTypeB = {
             ...order,
-            customerForInvoice: { ...order.customerForInvoice, taxes: [] },
+            customerForInvoice: { ...order.customerForInvoice, taxes: [] }, // Sin impuestos para Tipo B
             orderProducts: typeBProducts,
           };
+          // Tipo B usa documentId 12200 y costCenter 11534
           const invoiceDataTypeB = await mapperService.mapOrderToInvoice(
             orderTypeB,
             12200,
-            11534
+            11534,
           );
 
           console.log(
             "Datos factura tipo B:",
-            JSON.stringify(invoiceDataTypeB, null, 2)
+            JSON.stringify(invoiceDataTypeB, null, 2),
           );
 
           invoiceTypeB = await this._sendInvoiceToSiigo(
             invoiceDataTypeB,
             apiUrl,
-            authService
+            authService,
           );
           console.log(`✓ Factura tipo B creada: ${invoiceTypeB.id}`);
         } catch (error) {
           console.error("Error al crear factura tipo B:", error.message);
-          // IMPORTANTE: Si falla tipo B, no revertir tipo A
-          // Solo loggear el error y continuar
-          console.warn(
-            "⚠ Factura tipo A fue creada exitosamente, pero tipo B falló. Continuar con precaución."
+          // IMPORTANTE: Si falla tipo B, y se creó A, no revertir A
+          // Solo loggear el error y continuar. Si A no se creó, lanzamos error.
+          if (invoiceTypeA) {
+            console.warn(
+              "⚠ Factura tipo A fue creada exitosamente, pero tipo B falló. Continuar con precaución.",
+            );
+          } else {
+            throw new Error(
+              `Error al crear factura tipo B: ${error.message}. (No se creó Tipo A)`,
+            );
+          }
+        }
+      }
+
+      // Si no se creó ninguna factura, lanzar error (orden vacía o error de lógica)
+      if (!invoiceTypeA && !invoiceTypeB) {
+        throw new Error(
+          "No se creó ninguna factura (ni Tipo A ni Tipo B). Verifique los productos.",
+        );
+      }
+
+      // ========== ACTUALIZAR ORDEN CON LOS SIIGO IDS Y ENTIDADES INVOICE ==========
+      const invoiceIds = [];
+      const updateData = {};
+
+      // Sincronizar y asociar Factura A
+      if (invoiceTypeA) {
+        const localInvoiceA = await this.syncLocalInvoice(invoiceTypeA);
+        invoiceIds.push(localInvoiceA.id);
+
+        // Retrocompatibilidad
+        updateData.siigoIdTypeA = String(invoiceTypeA.id);
+        updateData.invoiceNumberTypeA = String(
+          invoiceTypeA.number || invoiceTypeA.id,
+        );
+        updateData.siigoId = String(invoiceTypeA.id);
+        updateData.invoiceNumber = String(
+          invoiceTypeA.number || invoiceTypeA.id,
+        );
+      }
+
+      // Sincronizar y asociar Factura B
+      if (invoiceTypeB) {
+        const localInvoiceB = await this.syncLocalInvoice(invoiceTypeB);
+        invoiceIds.push(localInvoiceB.id);
+
+        // Retrocompatibilidad
+        updateData.siigoIdTypeB = String(invoiceTypeB.id);
+        updateData.invoiceNumberTypeB = String(
+          invoiceTypeB.number || invoiceTypeB.id,
+        );
+
+        // Si no hay factura A, usar B para los campos legacy
+        if (!invoiceTypeA) {
+          updateData.siigoId = String(invoiceTypeB.id);
+          updateData.invoiceNumber = String(
+            invoiceTypeB.number || invoiceTypeB.id,
           );
         }
       }
 
-      // ========== ACTUALIZAR ORDEN CON LOS SIIGO IDS ==========
-      const updateData = {
-        siigoIdTypeA: String(invoiceTypeA.id),
-        invoiceNumberTypeA: invoiceTypeA.number || invoiceTypeA.id,
-        // Mantener retrocompatibilidad con campos antiguos
-        siigoId: String(invoiceTypeA.id),
-        invoiceNumber: invoiceTypeA.number || invoiceTypeA.id,
-      };
+      // Actualizar la relación 'invoices' y desactivar el flag emitInvoice
+      updateData.invoices = invoiceIds;
+      updateData.emitInvoice = false;
 
-      if (invoiceTypeB) {
-        updateData.siigoIdTypeB = String(invoiceTypeB.id);
-        updateData.invoiceNumberTypeB = invoiceTypeB.number || invoiceTypeB.id;
-      }
+      console.log(
+        "Updating Order with data:",
+        JSON.stringify(updateData, null, 2),
+      );
 
-      await strapi.db.query(ORDER_SERVICE).update({
-        where: { id: orderId },
-        data: updateData,
-      });
+      const updateResult = await strapi.entityService.update(
+        ORDER_SERVICE,
+        orderId,
+        {
+          data: updateData,
+        },
+      );
+
+      console.log(
+        "Order update result:",
+        JSON.stringify(updateResult, null, 2),
+      );
 
       // ========== MARCAR ITEMS COMO FACTURADOS ==========
       const orderWithItems = await strapi.entityService.findOne(
         ORDER_SERVICE,
         orderId,
-        { populate: ["items"] }
+        { populate: ["items"] },
       );
 
       const itemIds = orderWithItems.items?.map((i) => i.id) || [];
@@ -157,23 +218,26 @@ module.exports = ({ strapi }) => ({
       }
 
       console.log(
-        `✓ Order ${order.code} actualizada con facturas tipo A${invoiceTypeB ? " y tipo B" : ""}`
+        `✓ Order ${order.code} actualizada con facturas:${invoiceTypeA ? " Tipo A" : ""}${invoiceTypeB ? " Tipo B" : ""}`,
       );
 
       // ========== RETORNAR RESULTADO ==========
-      return {
+      // Construir respuesta robusta
+      const result = {
         success: true,
         testMode: false,
         order: {
           id: order.id,
           code: order.code,
         },
-        invoiceTypeA: {
-          siigoId: invoiceTypeA.id,
-          number: invoiceTypeA.number,
-          date: invoiceTypeA.date,
-          total: invoiceTypeA.total,
-        },
+        invoiceTypeA: invoiceTypeA
+          ? {
+              siigoId: invoiceTypeA.id,
+              number: invoiceTypeA.number,
+              date: invoiceTypeA.date,
+              total: invoiceTypeA.total,
+            }
+          : null,
         invoiceTypeB: invoiceTypeB
           ? {
               siigoId: invoiceTypeB.id,
@@ -182,18 +246,23 @@ module.exports = ({ strapi }) => ({
               total: invoiceTypeB.total,
             }
           : null,
-        // Mantener retrocompatibilidad
-        invoice: {
-          siigoId: invoiceTypeA.id,
-          number: invoiceTypeA.number,
-          date: invoiceTypeA.date,
-          total: invoiceTypeA.total,
-        },
       };
+
+      // Mantener retrocompatibilidad en el campo 'invoice'
+      // Si existe A, usa A. Si no, usa B.
+      const mainInvoice = invoiceTypeA || invoiceTypeB;
+      result.invoice = {
+        siigoId: mainInvoice.id,
+        number: mainInvoice.number,
+        date: mainInvoice.date,
+        total: mainInvoice.total,
+      };
+
+      return result;
     } catch (error) {
       console.error(
         `Error al crear factura para Order ID ${orderId}:`,
-        error.message
+        error.message,
       );
       throw new Error(`Error al crear factura en Siigo: ${error.message}`);
     }
@@ -218,7 +287,7 @@ module.exports = ({ strapi }) => ({
       {
         method: "POST",
         body: JSON.stringify(invoiceData),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -228,7 +297,7 @@ module.exports = ({ strapi }) => ({
       if (response.status === 400 && retryCount < 3) {
         // Lógica de reintento para errores de totales (redondeo)
         console.log(
-          `Error 400 recibido (Intento ${retryCount + 1}). Intentando extraer valor correcto para reintento...`
+          `Error 400 recibido (Intento ${retryCount + 1}). Intentando extraer valor correcto para reintento...`,
         );
         try {
           // Extraer todos los números del mensaje de error
@@ -278,7 +347,7 @@ module.exports = ({ strapi }) => ({
 
             if (newTotal !== null) {
               console.log(
-                `[Siigo Retry] Ajustando total de pago: ${currentTotal} -> ${newTotal}`
+                `[Siigo Retry] Ajustando total de pago: ${currentTotal} -> ${newTotal}`,
               );
 
               // Crear copia profunda para no mutar el original inesperadamente si hubiera más lógicas
@@ -289,7 +358,7 @@ module.exports = ({ strapi }) => ({
                 newInvoiceData,
                 apiUrl,
                 authService,
-                retryCount + 1
+                retryCount + 1,
               );
             }
           }
@@ -327,12 +396,12 @@ module.exports = ({ strapi }) => ({
         `${apiUrl}/v1/invoices/${siigoInvoiceId}`,
         {
           method: "GET",
-        }
+        },
       );
 
       if (!response.ok) {
         throw new Error(
-          `Error HTTP ${response.status}: ${response.statusText}`
+          `Error HTTP ${response.status}: ${response.statusText}`,
         );
       }
 
@@ -340,9 +409,48 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al consultar factura ${siigoInvoiceId}:`,
-        error.message
+        error.message,
       );
       throw new Error(`Error al consultar factura en Siigo: ${error.message}`);
+    }
+  },
+
+  /**
+   * Busca facturas por número en Siigo
+   * @param {String|Number} number - Número de consecutivo
+   * @returns {Array} - Lista de facturas encontradas
+   */
+  async getInvoicesByNumber(number) {
+    try {
+      const authService = strapi.service("api::siigo.auth");
+      const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+
+      // Intentamos filtrar por número si la API lo soporta.
+      // Siigo API v1 suele tener ?number= o ?name=
+      const response = await authService.authenticatedFetch(
+        `${apiUrl}/v1/invoices?number=${number}&page=1&page_size=10`,
+        {
+          method: "GET",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Error HTTP ${response.status}: ${response.statusText}`,
+        );
+      }
+
+      const data = await response.json();
+      // La respuesta de Siigo para listas suele tener "results"
+      return data.results || [];
+    } catch (error) {
+      console.error(
+        `Error al buscar facturas por número ${number}:`,
+        error.message,
+      );
+      // Retornar vacío en caso de error para no bloquear el flujo completo, o lanzar?
+      // Mejor lanzar para que controller sepa que falló la búsqueda.
+      throw new Error(`Error al buscar facturas en Siigo: ${error.message}`);
     }
   },
 
@@ -360,12 +468,12 @@ module.exports = ({ strapi }) => ({
         `${apiUrl}/v1/invoices/${siigoInvoiceId}/pdf`,
         {
           method: "GET",
-        }
+        },
       );
 
       if (!response.ok) {
         throw new Error(
-          `Error HTTP ${response.status}: ${response.statusText}`
+          `Error HTTP ${response.status}: ${response.statusText}`,
         );
       }
 
@@ -384,10 +492,10 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al descargar el PDF de la factura ${siigoInvoiceId}:`,
-        error.message
+        error.message,
       );
       throw new Error(
-        `Error al descargar PDF de factura en Siigo: ${error.message}`
+        `Error al descargar PDF de factura en Siigo: ${error.message}`,
       );
     }
   },
@@ -447,7 +555,7 @@ module.exports = ({ strapi }) => ({
         } catch (error) {
           console.error(
             `Error al facturar orden ${order.code}:`,
-            error.message
+            error.message,
           );
           results.push({
             orderId: order.id,
@@ -460,7 +568,7 @@ module.exports = ({ strapi }) => ({
       }
 
       console.log(
-        `Procesamiento completado. Exitosas: ${successful}, Fallidas: ${failed}`
+        `Procesamiento completado. Exitosas: ${successful}, Fallidas: ${failed}`,
       );
 
       return {
@@ -489,6 +597,50 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error("Error al crear nota crédito:", error.message);
       throw error;
+    }
+  },
+
+  /**
+   * Crea o actualiza una entidad Invoice local basada en datos de Siigo
+   * @param {Object} siigoInvoiceData - Datos crudos de la factura de Siigo
+   * @returns {Object} - Entidad Invoice de Strapi
+   */
+  async syncLocalInvoice(siigoInvoiceData) {
+    const { id, number, date, total, document } = siigoInvoiceData;
+    // Tratar de determinar el prefijo si viene en 'document'
+    const prefix = document?.id || "";
+    // Tipo (simplificado, se puede refinar)
+    const type = "Electronic"; // Asumimos default por ahora
+
+    // Buscar si ya existe
+    const existing = await strapi.db.query("api::invoice.invoice").findOne({
+      where: { siigoId: id },
+    });
+
+    if (existing) {
+      return await strapi.entityService.update(
+        "api::invoice.invoice",
+        existing.id,
+        {
+          data: {
+            number: Number(number),
+            date,
+            total,
+            prefix: String(prefix),
+          },
+        },
+      );
+    } else {
+      return await strapi.entityService.create("api::invoice.invoice", {
+        data: {
+          siigoId: id,
+          number: Number(number),
+          date,
+          total,
+          prefix: String(prefix),
+          type,
+        },
+      });
     }
   },
 });

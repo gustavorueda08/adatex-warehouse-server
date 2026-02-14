@@ -1,0 +1,28 @@
+{
+  "kind": "collectionType",
+  "collectionName": "lines",
+  "info": {
+    "singularName": "line",
+    "pluralName": "lines",
+    "displayName": "Line"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "description": {
+      "type": "string"
+    },
+    "collections": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::collection.collection",
+      "mappedBy": "line"
+    }
+  }
+}

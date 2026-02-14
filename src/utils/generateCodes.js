@@ -8,12 +8,12 @@ function generateItemBarcode(
   lot,
   itemNumber = null,
   containerCode = null,
-  isVirtual = false
+  isVirtual = false,
 ) {
   try {
     if (typeof product !== "object" && !product.barcode)
       throw new Error(
-        "Se requiere el producto con código para generar el codigo del Item"
+        "Se requiere el producto con código para generar el codigo del Item",
       );
     if (!quantity) throw new Error("Se requiere la cantidad");
     if (!lot) throw new Error("Se requiere el lote");
@@ -25,7 +25,7 @@ function generateItemBarcode(
     const formattedLot = String(lot).padStart(4, "0");
     const formattedItemNumber = itemNumber
       ? String(itemNumber).padStart(4, "0")
-      : Date.now();
+      : `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     return `${isVirtual ? "VIRTUAL-" : ""}${product.barcode}${formattedLot}${formattedItemNumber}${convertedCode ? `${convertedCode}` : ""}`;
   } catch (error) {

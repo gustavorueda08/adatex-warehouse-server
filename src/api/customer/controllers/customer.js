@@ -192,5 +192,34 @@ module.exports = createCoreController(
         });
       }
     },
+    /**
+     * Obtiene los items facturables (despachados pero no facturados) para un cliente
+     * GET /api/customers/:customerId/invoiceable-items
+     */
+    async getInvoiceableItems(ctx) {
+      try {
+        const { customerId } = ctx.params;
+        if (!customerId) {
+          throw new Error("El id del cliente es requerido");
+        }
+
+        const customerService = strapi.service("api::customer.customer");
+        const items = await customerService.getInvoiceableItems(customerId);
+
+        return {
+          data: items,
+          meta: {
+            count: items.length,
+          },
+        };
+      } catch (error) {
+        return ctx.internalServerError(error.message, {
+          error: {
+            status: 500,
+            message: error.message,
+          },
+        });
+      }
+    },
   })
 );

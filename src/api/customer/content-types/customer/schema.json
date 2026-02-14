@@ -120,6 +120,15 @@
       "relation": "manyToOne",
       "target": "api::seller.seller",
       "inversedBy": "customers"
+    },
+    "invoices": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::invoice.invoice",
+      "mappedBy": "customer"
+    },
+    "companyName": {
+      "type": "string"
     }
   }
 }

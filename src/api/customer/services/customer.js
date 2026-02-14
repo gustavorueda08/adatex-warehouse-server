@@ -390,6 +390,75 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
       );
     });
   },
+  /**
+   * Obtiene items despachados (SOLD) pero no facturados para un cliente, agrupados por producto.
+   * @param {Number} customerId
+   */
+  async getInvoiceableItems(customerId) {
+    // 1. Buscar órdenes de venta completadas
+    const orders = await strapi.entityService.findMany(ORDER_SERVICE, {
+      filters: {
+        customer: customerId,
+        type: ORDER_TYPES.SALE,
+        state: ORDER_STATES.COMPLETED,
+      },
+      populate: [
+        "orderProducts",
+        "orderProducts.product",
+        "orderProducts.items",
+        "orderProducts.items.product",
+      ],
+    });
+
+    const productMap = {};
+
+    // 2. Iterar y filtrar items
+    for (const order of orders) {
+      for (const op of order.orderProducts || []) {
+        const product = op.product;
+        if (!product) continue;
+
+        if (!productMap[product.id]) {
+          productMap[product.id] = {
+            product: {
+              id: product.id,
+              name: product.name,
+              code: product.code,
+              unit: product.unit,
+            },
+            items: [],
+            totalQuantity: 0,
+          };
+        }
+
+        // Filtrar items: Estado SOLD y isInvoiced false
+        const validItems = (op.items || []).filter(
+          (item) => item.state === ITEM_STATES.SOLD && !item.isInvoiced
+        );
+
+        for (const item of validItems) {
+          productMap[product.id].items.push({
+            id: item.id,
+            barcode: item.barcode,
+            currentQuantity: item.currentQuantity,
+            originalQuantity: item.originalQuantity,
+            sourceOrder: {
+              id: order.id,
+              code: order.code,
+              date: order.actualDepositPaymentDate || order.updatedAt,
+            },
+          });
+          productMap[product.id].totalQuantity += Number(
+            item.currentQuantity || 0
+          );
+        }
+      }
+    }
+
+    // 3. Retornar array (filtrando productos sin items)
+    return Object.values(productMap).filter((group) => group.items.length > 0);
+  },
+
   async delete(id) {
     const deletedCustomer = await strapi.entityService.delete(
       CUSTOMER_SERVICE,

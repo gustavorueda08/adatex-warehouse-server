@@ -18,6 +18,8 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       if (!data?.data) {
         throw new Error("Los datos de la orden son requeridos");
       }
+      console.log(JSON.stringify(data.data), "DATOOOOOSSSS");
+
       const order = await orderService.create(data.data);
       if (!order) {
         throw new Error("Error al crear la orden");
@@ -54,6 +56,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
         throw new Error("Los datos de la orden son requeridos");
       }
 
+      console.log(JSON.stringify(data.data), "DATOOOOOSSSS");
       const { products = [], ...rest } = data.data;
       const order = await orderService.update({
         products,
@@ -110,7 +113,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       });
     }
   },
-
   // Agrega un producto al Order
   async add(ctx) {
     try {
@@ -316,13 +318,13 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       // El servicio ahora retorna { buffer, mimeType, filename, type }
       const downloadData = await orderService.downloadInvoice(
         orderId,
-        invoiceType
+        invoiceType,
       );
 
       ctx.set("Content-Type", downloadData.mimeType);
       ctx.set(
         "Content-Disposition",
-        `attachment; filename="${downloadData.filename}"`
+        `attachment; filename="${downloadData.filename}"`,
       );
       ctx.body = downloadData.buffer;
     } catch (error) {

@@ -55,27 +55,6 @@
     "completedDate": {
       "type": "datetime"
     },
-    "cancelledDate": {
-      "type": "datetime"
-    },
-    "estimatedDepositPaymentDate": {
-      "type": "date"
-    },
-    "estimatedDispatchDate": {
-      "type": "date"
-    },
-    "estimatedWarehouseDate": {
-      "type": "date"
-    },
-    "actualDepositPaymentDate": {
-      "type": "date"
-    },
-    "actualDispatchDate": {
-      "type": "date"
-    },
-    "actualWarehouseDate": {
-      "type": "date"
-    },
     "currency": {
       "type": "enumeration",
       "default": "USD",
@@ -184,6 +163,12 @@
       "target": "api::item.item",
       "mappedBy": "sourceOrder"
     },
+    "invoices": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::invoice.invoice",
+      "inversedBy": "orders"
+    },
     "attachments": {
       "type": "media",
       "multiple": true,
@@ -218,6 +203,15 @@
       "relation": "oneToMany",
       "target": "api::barcode-mapping.barcode-mapping",
       "mappedBy": "createdFromOrder"
+    },
+    "estimatedCompletedDate": {
+      "type": "date"
+    },
+    "estimatedTransitDate": {
+      "type": "date"
+    },
+    "transitDate": {
+      "type": "date"
     }
   }
 }

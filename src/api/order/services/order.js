@@ -223,6 +223,99 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           );
         }
 
+        // Lógica para asociar facturas manuales (universal para sale y partial-invoice)
+        // Se espera: manualInvoiceNumbers: ["123", "195"]
+        if (
+          update.manualInvoiceNumbers &&
+          Array.isArray(update.manualInvoiceNumbers)
+        ) {
+          const siigoService = strapi.service("api::siigo.invoice");
+          const foundInvoicesIds = [];
+
+          for (const numStr of update.manualInvoiceNumbers) {
+            const num = parseInt(numStr, 10);
+            if (isNaN(num)) continue;
+
+            try {
+              const results = await siigoService.getInvoicesByNumber(num);
+              // Results puede ser un array con coincidencias.
+              // Siigo puede retornar varias si hay distintos prefijos con mismo número?
+              // Por ahora tomamos el primero que coincida o todos.
+
+              if (results && results.length > 0) {
+                for (const invData of results) {
+                  // Solo si coincide el número exactamente (por si la búsqueda fue laxa)
+                  if (invData.number === num) {
+                    const localInvoice =
+                      await siigoService.syncLocalInvoice(invData);
+                    foundInvoicesIds.push(localInvoice.id);
+                  }
+                }
+              } else {
+                logger.warn(
+                  `No se encontró factura con número ${num} en Siigo`
+                );
+              }
+            } catch (err) {
+              logger.warn(
+                `Error buscando factura manual ${num}: ${err.message}`
+              );
+            }
+          }
+
+          if (foundInvoicesIds.length > 0) {
+            // Asociar a la orden vía 'invoices' relation
+            // OJO: Queremos AGREGAR, no reemplazar? O reemplazar?
+            // Usualmente si mando una lista, espero que esa sea LA lista.
+            // Pero cuidado con no borrar historial si se edita.
+            // Asumiremos que el frontend manda la lista acumulada o se reemplaza.
+            // Para seguridad, hacemos merge con los que ya tenga?
+            // Mejor reemplazar para permitir correcciones (quitar una factura erronea).
+
+            update.invoices = foundInvoicesIds;
+
+            // Si la orden NO tiene siigoId antiguo, le ponemos el de la primera factura para retrocompatibilidad visual
+            // (aunque ya no deberíamos depender de eso, pero el frontend puede usarlo)
+            const firstInv = await strapi.entityService.findOne(
+              "api::invoice.invoice",
+              foundInvoicesIds[0]
+            );
+            if (firstInv) {
+              if (!update.invoiceNumber) update.invoiceNumber = firstInv.number;
+              if (!update.siigoId) update.siigoId = firstInv.siigoId; // Deprecated field
+            }
+          }
+        }
+
+        // Lógica antigua de siigoId single para retrocompatibilidad (si frontend manda siigoId en vez de manualInvoiceNumbers)
+        if (
+          !update.manualInvoiceNumbers &&
+          currentOrder.type === ORDER_TYPES.PARTIAL_INVOICE &&
+          (update.siigoId || update.siigoIdTypeA)
+        ) {
+          const siigoId = update.siigoIdTypeA || update.siigoId;
+          // ... (lógica existente que busca por ID y actualiza campos antiguos) ...
+          // Podríamos aprovechar para crear el Invoice entity también aquí
+          try {
+            const siigoService = strapi.service("api::siigo.invoice");
+            const invoiceData = await siigoService.getInvoice(siigoId);
+            if (invoiceData) {
+              const localInvoice =
+                await siigoService.syncLocalInvoice(invoiceData);
+              update.invoices = [localInvoice.id]; // Asociar nueva entidad
+
+              // Retrocompatibilidad campos planos
+              update.invoiceNumber = invoiceData.number;
+              update.invoiceNumberTypeA = invoiceData.number;
+              if (!update.actualDepositPaymentDate) {
+                update.actualDepositPaymentDate = invoiceData.date;
+              }
+            }
+          } catch (e) {
+            /* ignore */
+          }
+        }
+
         // Actualizar y retornar la orden completa
         const updatedOrder = await strapi.entityService.update(
           ORDER_SERVICE,
