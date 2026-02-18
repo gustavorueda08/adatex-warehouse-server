@@ -987,6 +987,8 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     description: Schema.Attribute.Text;
+    hasVariableQuantity: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<true>;
     hideFor: Schema.Attribute.Relation<
       'manyToMany',
       'plugin::users-permissions.user'

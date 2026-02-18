@@ -90,6 +90,10 @@
       "relation": "manyToMany",
       "target": "plugin::users-permissions.user",
       "mappedBy": "hideProducts"
+    },
+    "hasVariableQuantity": {
+      "type": "boolean",
+      "default": true
     }
   }
 }
