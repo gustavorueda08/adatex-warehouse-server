@@ -56,6 +56,7 @@ module.exports = createCoreController("api::product.product", ({ strapi }) => ({
     try {
       const productService = strapi.service("api::product.product");
       const result = await productService.findWithInventory(ctx.query);
+      console.log("QUERY", JSON.stringify(ctx.query));
 
       return result;
     } catch (error) {
@@ -123,6 +124,66 @@ module.exports = createCoreController("api::product.product", ({ strapi }) => ({
     }
   },
 
+  async create(ctx) {
+    try {
+      const productService = strapi.service("api::product.product");
+      const data = ctx.request.body;
+
+      if (!data?.data) {
+        throw new Error("Product data is required");
+      }
+
+      const product = await productService.create(data.data);
+
+      return {
+        data: product,
+        meta: {},
+      };
+    } catch (error) {
+      logger.error("Error creating product:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductCreateError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
+  async update(ctx) {
+    try {
+      const { id } = ctx.params;
+      const productService = strapi.service("api::product.product");
+      const data = ctx.request.body;
+
+      if (!id) {
+        throw new Error("Product ID is required");
+      }
+
+      if (!data?.data) {
+        throw new Error("Product data is required");
+      }
+
+      const product = await productService.update(id, data.data);
+
+      return {
+        data: product,
+        meta: {},
+      };
+    } catch (error) {
+      logger.error("Error updating product:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductUpdateError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
   /**
    * Obtiene los items de un producto con sus movimientos e historial
    * GET /api/products/:productId/items

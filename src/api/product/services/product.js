@@ -5,52 +5,131 @@
  */
 
 const { createCoreService } = require("@strapi/strapi").factories;
+const compareRelationArrays = require("../../../utils/compareRelationArrays");
 
 const SERVICE_UID = "api::product.product";
 
 module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
   /**
-   * Carga masiva de products. Si un item trae id, se actualiza; si no, se crea
-   * y se sincroniza con Siigo para obtener siigoId.
-   * @param {Array<Object>} products
-   * @returns {Object} resumen de la operación
+   * Creates a new product and handles collections/hideFor associations
+   * @param {Object} data
+   * @returns {Object} Created product
    */
+  async create(data) {
+    const { collections = [], hideFor = [], ...rest } = data;
+
+    const createData = {
+      ...rest,
+    };
+
+    if (collections.length > 0) {
+      createData.collections = { connect: collections };
+    }
+
+    if (hideFor.length > 0) {
+      createData.hideFor = { connect: hideFor };
+    }
+
+    const newProduct = await strapi.entityService.create(SERVICE_UID, {
+      data: createData,
+    });
+
+    return newProduct;
+  },
+
+  /**
+   * Updates a product and handles collections/hideFor associations
+   * @param {string|number} id
+   * @param {Object} data
+   * @returns {Object} Updated product
+   */
+  async update(id, data) {
+    const { collections = [], hideFor = [], ...rest } = data;
+
+    return strapi.db.transaction(async (trx) => {
+      const currentProduct = await strapi.entityService.findOne(
+        SERVICE_UID,
+        id,
+        {
+          populate: ["collections", "hideFor"],
+        },
+        { transacting: trx },
+      );
+
+      if (!currentProduct) {
+        throw new Error(`Product with ID ${id} not found`);
+      }
+
+      // Handle collections
+      const currentCollections =
+        currentProduct.collections?.map((c) => c.id) || [];
+      const { toAdd: collectionsToAdd, toRemove: collectionsToRemove } =
+        compareRelationArrays(currentCollections, collections);
+
+      // Handle hideFor
+      const currentHideFor = currentProduct.hideFor?.map((u) => u.id) || [];
+      const { toAdd: hideForToAdd, toRemove: hideForToRemove } =
+        compareRelationArrays(currentHideFor, hideFor);
+
+      const updateData = {
+        ...rest,
+        collections: {
+          connect: collectionsToAdd,
+          disconnect: collectionsToRemove,
+        },
+        hideFor: {
+          connect: hideForToAdd,
+          disconnect: hideForToRemove,
+        },
+      };
+
+      const updatedProduct = await strapi.entityService.update(
+        SERVICE_UID,
+        id,
+        {
+          data: updateData,
+        },
+        { transacting: trx },
+      );
+
+      return updatedProduct;
+    });
+  },
+
   /**
    * Obtiene products con inventario calculado
    * @param {Object} params - Query params de Strapi
    * @returns {Object} - Resultados paginados con inventario
    */
   /**
-   * Helper to calculate inventory for a list of products
-   * @param {Array} products
-   * @returns {Array} products with inventory
+   * Helper: builds a breakdown entry from an order + quantity
+   */
+  _buildBreakdownEntry(order, quantity) {
+    const customer = order.customer;
+    const supplier = order.supplier;
+    return {
+      order: order.id,
+      orderCode: order.code || null,
+      quantity,
+      customer: customer
+        ? [customer.name, customer.lastName].filter(Boolean).join(" ")
+        : null,
+      supplier: supplier
+        ? [supplier.name, supplier.lastname].filter(Boolean).join(" ")
+        : null,
+      estimatedCompletedDate: order.estimatedCompletedDate || null,
+    };
+  },
+
+  /**
+   * ─── CURRENT INVENTORY ───
+   * Calculates live inventory from items + draft orderProducts.
+   * @param {Array} products - Products with populated items and orderProducts
+   * @param {Object} options
+   * @returns {Array} products with inventory stats
    */
   calculateInventoryForProducts(products, options = {}) {
-    const {
-      userPopulate = {},
-      fromDate: fromDateParam,
-      toDate: toDateParam,
-    } = options;
-
-    // Normalizar fechas (ignorando hora para comparaciones de inclusión)
-    // Si no se envían, se asume rango abierto o lógica por defecto "hoy en adelante" para proyecciones
-    // Pero si el usuario no envía nada, ¿qué mostramos? Lo actual + proyecciones futuras?
-    // Asumiremos que si no hay fechas, es "current state" (sin proyecciones de required/production/arriving a futuro lejano, o TODO?)
-    // Para simplificar: Si no hay rango, mostramos CURRENT actual (reservas actuales, stock actual).
-    // Required/Production futuros dependen de fechas. Si no hay rango, ¿mostramos 0 o todo?
-    // Mostremos TODO lo pendiente si no hay filtro de fecha.
-
-    const fromDate = fromDateParam ? new Date(fromDateParam) : null;
-    const toDate = toDateParam ? new Date(toDateParam) : null;
-
-    // Helper para verificar rango
-    const isWithinRange = (dateStr) => {
-      if (!dateStr) return false;
-      const d = new Date(dateStr);
-      if (fromDate && d < fromDate) return false;
-      if (toDate && d > toDate) return false;
-      return true;
-    };
+    const { userPopulate = {} } = options;
 
     return products.map((product) => {
       const stats = {
@@ -62,138 +141,84 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         required: 0,
         available: 0,
         netAvailable: 0,
-        arriving: 0, // New Metric
+      };
+      const breakdown = {
+        production: [],
+        transit: [],
+        required: [],
       };
 
-      // Calculate physical stock (stock, transit, defective, reserved from items)
-      // Esto siempre es "CURRENT" snapshot de los items físicos en DB.
+      // ── Items (physical) ──
       if (product.items?.length > 0) {
         product.items.forEach((item) => {
           const qty = Number(item.currentQuantity) || 0;
+          const wType = item.warehouse?.type;
+          if (!wType) return;
 
-          // Reserved: items with state 'reserved' (Existing physical reservations)
-          if (item.state === "reserved") {
-            stats.reserved += qty;
-          }
-
-          // Warehouse based stats
-          if (item.warehouse?.type) {
-            if (item.warehouse.type === "stock") {
-              stats.stock += qty;
-            } else if (item.warehouse.type === "transit") {
-              stats.transit += qty;
-            } else if (item.warehouse.type === "defective") {
-              stats.defective += qty;
-            }
+          if (wType === "stock") {
+            if (item.state === "available") stats.stock += qty;
+            if (item.state === "reserved") stats.reserved += qty;
+          } else if (wType === "production") {
+            stats.production += qty;
+          } else if (wType === "transit") {
+            stats.transit += qty;
+          } else if (wType === "defective") {
+            stats.defective += qty;
           }
         });
       }
 
-      // Calculate future/projected metrics from orderProducts
+      // ── OrderProducts (draft orders only) ──
       if (product.orderProducts?.length > 0) {
         product.orderProducts.forEach((op) => {
           const requested = Number(op.requestedQuantity) || 0;
           const order = op.order;
+          if (!order || order.state !== "draft") return;
 
-          if (!order) return;
+          const entry = this._buildBreakdownEntry(order, requested);
 
-          // 1. ARRIVING: Purchase orders completed within range
-          // items que llegarán (Purchase -> Completed date en rango)
-          // OJO: Si la orden ya está completed, sus items YA deberían estar en stock/físico.
-          // Arriving suele ser "Incoming".
-          // Si la orden es 'purchase' y está en 'confirmed' o 'processing', es lo que esperamos.
-          // Si está 'completed', ya son items.
-          // Usaremos estimatedCompletedDate para filtrar.
-
-          if (
-            order.type === "purchase" &&
-            ["confirmed", "processing"].includes(order.state)
-          ) {
-            // ARRIVING logic
-            if (isWithinRange(order.estimatedCompletedDate)) {
-              stats.arriving += requested;
-            }
-
-            // PRODUCTION logic (Purchase orders in production phase?)
-            // Si definimos production como lo que está por llegar/producirse.
-            // En tu lógica anterior: op.order?.destinationWarehouse?.type === "production"
-            // Mantengamos esa lógica si aplica, o la basada en fechas.
-            // Asumiremos:
-            // - Arriving: Llega al final (CompletedDate)
-            // - Transit: En transito (TransitDate)
-            // - Production: En producción?
-
-            // Re-usemos tu lógica anterior combinada con fechas:
-
-            // PRODUCTION
-            // Si el destino es producción o fecha encaja
-            // (La definición exacta de "production" vs "arriving" puede solaparse si no se define estricto)
-            // Usaré la lógica solicitada:
-            // "production ... considered if estimatedTransitDate OR estimatedCompletedDate falls within range"
-            if (
-              isWithinRange(order.estimatedTransitDate) ||
-              isWithinRange(order.estimatedCompletedDate)
-            ) {
-              // Evitar doble conteo si ya está en Arriving?
-              // Usualmente metrics son vistas distintas.
-              // stats.production += requested;
-              // Pero cuidado con sumar al netAvailable duplicado.
-              // NetAvailable = stock + arriving - reserved - required. (Production/Transit son informativos o parte de Arriving?)
-              // En tu fórmula anterior: Net = stock + production + transit - reserved - required
-              // Ahora agregamos Arriving.
-              // Vamos a separar roles:
-              // Arriving: Lo que entra neto al stock disponible final.
-              // Production/Transit: Estados intermedios.
-              // Voy a sumar 'Arriving' al NetAvailable.
-              // 'Production' y 'Transit' serán informativos filtrados por fecha.
-
-              stats.production += requested;
-            }
-
-            // TRANSIT
-            if (isWithinRange(order.estimatedTransitDate)) {
-              stats.transit += requested;
-            }
+          // Production: draft orders targeting production warehouse
+          if (order.destinationWarehouse?.type === "production") {
+            stats.production += requested;
+            breakdown.production.push(entry);
           }
 
-          // 2. REQUIRED: Sale orders (Demand)
-          // Sales with no items assigned yet (pure demand)
-          if (order.type === "sale" && (!op.items || op.items.length === 0)) {
-            if (isWithinRange(order.estimatedCompletedDate)) {
-              stats.required += requested;
-            }
+          // Transit: draft orders targeting transit warehouse
+          if (order.destinationWarehouse?.type === "transit") {
+            stats.transit += requested;
+            breakdown.transit.push(entry);
+          }
+
+          // Required: draft sale orders from stock warehouse
+          if (
+            order.type === "sale" &&
+            order.sourceWarehouse?.type === "stock"
+          ) {
+            stats.required += requested;
+            breakdown.required.push(entry);
           }
         });
       }
 
-      // Available: stock - reserved (Current physical availability)
+      // ── Derived metrics ──
       stats.available = Math.max(0, stats.stock - stats.reserved);
-
-      // NetAvailable: Projected availability
-      // stock (actual) + arriving (futuro entrada) - reserved (físico actual) - required (futuro salida)
-      // * Nota: 'transit' y 'production' suelen ser subsets de 'arriving' o etapas previas.
-      // Si sumamos todo se duplica. Usaré 'arriving' como la fuente de verdad de entradas futuras en el rango.
-      // O si el usuario prefiere la fórmula vieja + arriving?
-      // "NetAvailable logic: Updated to stock + arriving - reserved - required for range projections." -> SEGÚN TU PREVIOUS SUMMARY.
-
       stats.netAvailable =
-        stats.stock + stats.arriving - stats.reserved - stats.required;
+        stats.stock -
+        stats.reserved -
+        stats.required +
+        stats.production +
+        stats.transit;
 
-      // Cleanup
+      // ── Cleanup response ──
+      const productData = { ...product };
       const userAskedForItems =
         userPopulate.items || userPopulate["*"] || userPopulate.includeItems;
       const userAskedForOrderProducts =
         userPopulate.orderProducts || userPopulate["*"];
-
-      const productData = { ...product };
-
       if (!userAskedForItems) delete productData.items;
       if (!userAskedForOrderProducts) delete productData.orderProducts;
 
-      return {
-        ...productData,
-        inventory: stats,
-      };
+      return { ...productData, inventory: { ...stats, breakdown } };
     });
   },
 
@@ -223,6 +248,18 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
     if (productIds.length === 0) return products;
 
+    // Ensure we capture the full day by setting time to end of day
+    // This fixes the issue where movements on the same day were excluded if time was 00:00
+    // We also account for timezone (approx UTC-5) by extending into the next UTC day
+    let queryDate = date;
+    const dateObj = new Date(date);
+    if (!isNaN(dateObj.getTime())) {
+      // Set to 23:59:59.999 + 5 hours buffer for UTC-5
+      // This pushes it to approx 04:59:59 of the next day in UTC
+      dateObj.setUTCHours(23 + 5, 59, 59, 999);
+      queryDate = dateObj.toISOString();
+    }
+
     // 2. Fetch all movements for these products up to the date
     // We need to fetch movements for items belonging to these products
     const movements = await strapi.entityService.findMany(
@@ -234,7 +271,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
               id: { $in: productIds },
             },
           },
-          createdAt: { $lte: date },
+          createdAt: { $lte: queryDate },
         },
         populate: [
           "item",
@@ -297,14 +334,10 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
         case OUT:
           // Item leaves warehouse
-          // If pure OUT, warehouse might become null or it effectively disappears from stock
-          // But we keep tracking it.
-          // currentItemState.warehouseId = null; // Maybe?
-          if (mov.balanceAfter <= 0) {
-            // Effectively gone/consumed
-          }
-          // Mapping state based on order type?
-          // Usually OUT is final.
+          // We must clear the warehouseId so it doesn't count towards stock/defective/transit
+          currentItemState.warehouseId = null;
+          // Also reset state from 'reserved' if it was reserved, effectively making it 'gone'
+          currentItemState.state = "available";
           break;
 
         case TRANSFER:
@@ -325,20 +358,25 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       }
     }
 
-    // 5. Aggregate per Product
-    const productStats = {}; // productId -> stats object
+    // 5. Aggregate per Product - Physical Items (same formulas as Current mode)
+    const productStats = {};
 
     productIds.forEach((pid) => {
       productStats[pid] = {
         stock: 0,
-        production: 0, // Hard to reconstruct without order history, maybe skip or assume 0
+        production: 0,
         transit: 0,
         defective: 0,
         reserved: 0,
-        required: 0, // Hard to reconstruct
+        required: 0,
         available: 0,
         netAvailable: 0,
       };
+    });
+
+    const productBreakdown = {};
+    productIds.forEach((pid) => {
+      productBreakdown[pid] = { production: [], transit: [], required: [] };
     });
 
     Object.values(itemStates).forEach((itemState) => {
@@ -346,27 +384,104 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       if (!stats) return;
 
       const qty = itemState.quantity;
-      if (qty <= 0) return; // Skip zero/negative quantity items
+      if (qty <= 0) return;
 
-      // Reserved
-      if (itemState.state === "reserved") {
-        stats.reserved += qty;
-      }
+      const wType =
+        itemState.warehouseId && warehouseMap[itemState.warehouseId]
+          ? warehouseMap[itemState.warehouseId].type
+          : null;
 
-      // Warehouse type stats
-      if (itemState.warehouseId && warehouseMap[itemState.warehouseId]) {
-        const wType = warehouseMap[itemState.warehouseId].type;
-        if (wType === "stock") {
-          stats.stock += qty;
-        } else if (wType === "transit") {
-          stats.transit += qty;
-        } else if (wType === "defective") {
-          stats.defective += qty;
-        }
+      if (wType === "stock") {
+        if (itemState.state === "available") stats.stock += qty;
+        if (itemState.state === "reserved") stats.reserved += qty;
+      } else if (wType === "production") {
+        stats.production += qty;
+      } else if (wType === "transit") {
+        stats.transit += qty;
+      } else if (wType === "defective") {
+        stats.defective += qty;
       }
     });
 
-    // 6. Final Calculation & Return
+    // 6. Fetch OrderProducts that were in DRAFT state at queryDate
+    const orderProducts = await strapi.entityService.findMany(
+      "api::order-product.order-product",
+      {
+        filters: {
+          product: { id: { $in: productIds } },
+          order: {
+            createdAt: { $lte: queryDate },
+            state: { $ne: "cancelled" },
+          },
+        },
+        populate: {
+          order: {
+            fields: [
+              "type",
+              "state",
+              "code",
+              "createdAt",
+              "confirmedDate",
+              "completedDate",
+              "estimatedCompletedDate",
+            ],
+            populate: {
+              sourceWarehouse: { fields: ["type"] },
+              destinationWarehouse: { fields: ["type"] },
+              customer: { fields: ["name", "lastName"] },
+              supplier: { fields: ["name", "lastname"] },
+            },
+          },
+          product: { fields: ["id"] },
+        },
+        limit: -1,
+      },
+    );
+
+    const qDate = new Date(queryDate);
+
+    for (const op of orderProducts) {
+      if (!op.order) continue;
+
+      // Was this order still in Draft at queryDate?
+      const confirmedDate = op.order.confirmedDate
+        ? new Date(op.order.confirmedDate)
+        : null;
+      const completedDate = op.order.completedDate
+        ? new Date(op.order.completedDate)
+        : null;
+
+      // If confirmed/completed BEFORE or ON queryDate → movements handle it
+      if (confirmedDate && confirmedDate <= qDate) continue;
+      if (completedDate && completedDate <= qDate) continue;
+
+      const qty = Number(op.requestedQuantity) || 0;
+      const productId = op.product?.id;
+      const stats = productId ? productStats[productId] : null;
+      const bd = productId ? productBreakdown[productId] : null;
+      if (!stats) continue;
+
+      const entry = this._buildBreakdownEntry(op.order, qty);
+
+      // Same classification as Current mode:
+      if (op.order.destinationWarehouse?.type === "production") {
+        stats.production += qty;
+        bd?.production.push(entry);
+      }
+      if (op.order.destinationWarehouse?.type === "transit") {
+        stats.transit += qty;
+        bd?.transit.push(entry);
+      }
+      if (
+        op.order.type === "sale" &&
+        op.order.sourceWarehouse?.type === "stock"
+      ) {
+        stats.required += qty;
+        bd?.required.push(entry);
+      }
+    }
+
+    // 7. Derived metrics & Return (same formulas as Current mode)
     return products.map((product) => {
       const stats = productStats[product.id] || {
         stock: 0,
@@ -379,19 +494,179 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         netAvailable: 0,
       };
 
-      // Recalculate derived fields
       stats.available = Math.max(0, stats.stock - stats.reserved);
-      stats.netAvailable = stats.stock + stats.transit - stats.reserved; // Ignoring production/required for history as they are future/pending
+      stats.netAvailable =
+        stats.stock -
+        stats.reserved -
+        stats.required +
+        stats.production +
+        stats.transit;
 
-      return {
-        ...product,
-        inventory: stats,
+      const breakdown = productBreakdown[product.id] || {
+        production: [],
+        transit: [],
+        required: [],
       };
+
+      return { ...product, inventory: { ...stats, breakdown } };
+    });
+  },
+
+  /**
+   * ─── PROJECTED INVENTORY ───
+   * Projects inventory into a future date range.
+   * Uses current physical state + estimatedCompletedDate/estimatedTransitDate.
+   *
+   * @param {Array} products - Products with populated items and orderProducts
+   * @param {string} fromDate - Range start (ISO string)
+   * @param {string} toDate - Range end (ISO string)
+   * @returns {Array} products with projected inventory stats
+   */
+  calculateProjectedInventory(products, fromDate, toDate) {
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+
+    // Helper: is dateStr within [from, to]?
+    const isWithinRange = (dateStr) => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return d >= from && d <= to;
+    };
+
+    // Helper: is dateStr after toDate?
+    const isAfterRange = (dateStr) => {
+      if (!dateStr) return false;
+      return new Date(dateStr) > to;
+    };
+
+    return products.map((product) => {
+      const stats = {
+        stock: 0,
+        production: 0,
+        transit: 0,
+        defective: 0,
+        reserved: 0,
+        required: 0,
+        arriving: 0,
+        available: 0,
+        netAvailable: 0,
+      };
+      const breakdown = {
+        production: [],
+        transit: [],
+        arriving: [],
+        required: [],
+      };
+
+      // ── Items (physical) ──
+      if (product.items?.length > 0) {
+        product.items.forEach((item) => {
+          const qty = Number(item.currentQuantity) || 0;
+          const wType = item.warehouse?.type;
+          if (!wType) return;
+
+          const sourceOrder = item.sourceOrder;
+          const estCompleted = sourceOrder?.estimatedCompletedDate;
+          const estTransit = sourceOrder?.estimatedTransitDate;
+
+          if (wType === "stock") {
+            if (item.state === "available") stats.stock += qty;
+            if (item.state === "reserved") stats.reserved += qty;
+          } else if (wType === "production") {
+            if (isWithinRange(estCompleted)) {
+              stats.arriving += qty;
+            } else if (isWithinRange(estTransit)) {
+              stats.transit += qty;
+            } else if (isAfterRange(estCompleted)) {
+              stats.production += qty;
+            }
+          } else if (wType === "transit") {
+            if (isWithinRange(estCompleted)) {
+              stats.arriving += qty;
+            } else if (isAfterRange(estCompleted)) {
+              stats.transit += qty;
+            }
+          } else if (wType === "defective") {
+            stats.defective += qty;
+          }
+        });
+      }
+
+      // ── OrderProducts (draft orders only) ──
+      if (product.orderProducts?.length > 0) {
+        product.orderProducts.forEach((op) => {
+          const requested = Number(op.requestedQuantity) || 0;
+          const order = op.order;
+          if (!order || order.state !== "draft") return;
+
+          const estCompleted = order.estimatedCompletedDate;
+          const estTransit = order.estimatedTransitDate;
+          const destType = order.destinationWarehouse?.type;
+          const entry = this._buildBreakdownEntry(order, requested);
+
+          // ── Purchase orders: mutually exclusive states ──
+          if (
+            order.type === "purchase" &&
+            (destType === "production" || destType === "transit")
+          ) {
+            if (isWithinRange(estCompleted)) {
+              stats.arriving += requested;
+              breakdown.arriving.push(entry);
+            } else if (isWithinRange(estTransit)) {
+              stats.transit += requested;
+              breakdown.transit.push(entry);
+            } else if (isAfterRange(estCompleted)) {
+              if (destType === "production") {
+                stats.production += requested;
+                breakdown.production.push(entry);
+              } else if (destType === "transit") {
+                stats.transit += requested;
+                breakdown.transit.push(entry);
+              }
+            }
+          }
+
+          // ── Sale orders: required ──
+          if (
+            order.type === "sale" &&
+            order.sourceWarehouse?.type === "stock" &&
+            isWithinRange(estCompleted)
+          ) {
+            stats.required += requested;
+            breakdown.required.push(entry);
+          }
+        });
+      }
+
+      // ── Derived metrics ──
+      stats.available = Math.max(
+        0,
+        stats.stock - stats.reserved + stats.arriving,
+      );
+      stats.netAvailable =
+        stats.stock +
+        stats.arriving -
+        stats.reserved -
+        stats.required +
+        stats.production +
+        stats.transit;
+
+      // ── Cleanup ──
+      const productData = { ...product };
+      delete productData.items;
+      delete productData.orderProducts;
+
+      return { ...productData, inventory: { ...stats, breakdown } };
     });
   },
 
   /**
    * Obtiene products con inventario calculado
+   * Modes:
+   *   - No date params → Current inventory
+   *   - date → Historical inventory (reconstructed via movements)
+   *   - fromDate + toDate → Projected inventory
+   *
    * @param {Object} params - Query params de Strapi
    * @returns {Object} - Resultados paginados con inventario
    */
@@ -404,19 +679,39 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           warehouse: {
             fields: ["type"],
           },
+          sourceOrder: {
+            fields: ["estimatedCompletedDate", "estimatedTransitDate"],
+            populate: {
+              destinationWarehouse: {
+                fields: ["type"],
+              },
+            },
+          },
         },
       },
       orderProducts: {
         fields: ["requestedQuantity", "state"],
         populate: {
-          items: {
-            fields: ["id"],
-          },
           order: {
-            fields: ["type"],
+            fields: [
+              "type",
+              "state",
+              "code",
+              "estimatedCompletedDate",
+              "estimatedTransitDate",
+            ],
             populate: {
+              sourceWarehouse: {
+                fields: ["type"],
+              },
               destinationWarehouse: {
                 fields: ["type"],
+              },
+              customer: {
+                fields: ["name", "lastName"],
+              },
+              supplier: {
+                fields: ["name", "lastname"],
               },
             },
           },
@@ -453,20 +748,20 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       pagination: paginationParams,
       collections,
       includeItems,
-      date, // Extract date parameter (Historical)
-      fromDate, // New: Range start
-      toDate, // New: Range end
+      date, // Historical mode
+      fromDate, // Projection mode start
+      toDate, // Projection mode end
       ...otherParams
     } = params;
 
-    // Pass includeItems to calculateInventoryForProducts via userPopulate
+    // Pass includeItems to calculation via userPopulate
     if (includeItems === "true" || includeItems === true) {
       userPopulate.includeItems = true;
       inventoryPopulate.items = {
         ...inventoryPopulate.items,
         populate: {
           ...inventoryPopulate.items.populate,
-          warehouse: true, // Fetch full warehouse info
+          warehouse: true,
         },
         fields: undefined,
       };
@@ -510,20 +805,25 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       finalParams,
     );
 
-    // 5. Calculate inventory
+    // 5. Calculate inventory based on mode
     let productsWithInventory;
     if (date) {
-      // Use historical calculation
+      // Historical: reconstruct via movements
       productsWithInventory = await this.calculateHistoricalInventory(
         results,
         date,
       );
-    } else {
-      // Use current/live calculation with range projection options
-      productsWithInventory = this.calculateInventoryForProducts(results, {
-        userPopulate,
+    } else if (fromDate && toDate) {
+      // Projection: project into future date range
+      productsWithInventory = this.calculateProjectedInventory(
+        results,
         fromDate,
         toDate,
+      );
+    } else {
+      // Current: live snapshot
+      productsWithInventory = this.calculateInventoryForProducts(results, {
+        userPopulate,
       });
     }
 
@@ -627,7 +927,58 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           throw new Error("Cada producto debe ser un objeto");
         }
 
-        const { id, ...data } = productInput;
+        const { id, collections, hideFor, ...data } = productInput;
+
+        // ── Resolve collections by name ──
+        if (Array.isArray(collections)) {
+          const collectionIds = [];
+          for (const name of collections) {
+            if (typeof name === "number") {
+              collectionIds.push(name);
+              continue;
+            }
+            const found = await strapi.entityService.findMany(
+              "api::collection.collection",
+              {
+                filters: { name: { $eqi: name } },
+                fields: ["id"],
+                limit: 1,
+              },
+            );
+            if (found.length > 0) {
+              collectionIds.push(found[0].id);
+            }
+          }
+          if (collectionIds.length > 0) {
+            data.collections = { set: collectionIds };
+          }
+        }
+
+        // ── Resolve hideFor by username ──
+        if (Array.isArray(hideFor)) {
+          const userIds = [];
+          for (const username of hideFor) {
+            if (typeof username === "number") {
+              userIds.push(username);
+              continue;
+            }
+            const found = await strapi.entityService.findMany(
+              "plugin::users-permissions.user",
+              {
+                filters: { username: { $eq: username } },
+                fields: ["id"],
+                limit: 1,
+              },
+            );
+            if (found.length > 0) {
+              userIds.push(found[0].id);
+            }
+          }
+          if (userIds.length > 0) {
+            data.hideFor = { set: userIds };
+          }
+        }
+
         let product;
 
         if (id) {
