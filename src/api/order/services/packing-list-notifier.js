@@ -3,10 +3,10 @@
 const os = require("os");
 const path = require("path");
 const fs = require("fs/promises");
-const nodemailer = require("nodemailer");
 const moment = require("moment-timezone");
 const logger = require("../../../utils/logger");
 const { ORDER_SERVICE } = require("../../../utils/services");
+const sgMail = require("@sendgrid/mail");
 const { generatePackingListPDF } = require("./packing-list-pdf");
 
 /**
@@ -172,8 +172,9 @@ module.exports = ({ strapi }) => ({
       const attachments = [
         {
           filename: finalFileName,
-          content: buffer,
+          content: buffer.toString("base64"),
           contentType: "application/pdf",
+          disposition: "attachment",
         },
         ...invoiceAttachments,
       ];
@@ -296,38 +297,19 @@ module.exports = ({ strapi }) => ({
     order,
     attachments,
   }) {
-    const host = process.env.SMTP_HOST;
-    const port = Number(process.env.SMTP_PORT || 587);
-    const secure = process.env.SMTP_SECURE === "true";
-    const user = process.env.SMTP_USER;
-    const pass = process.env.SMTP_PASS;
-    const from = process.env.SMTP_FROM || user;
+    // Configurar API Key de SendGrid
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-    if (!host || !from) {
+    const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+
+    if (!process.env.SENDGRID_API_KEY || !from) {
       throw new Error(
-        "Variables de entorno SMTP incompletas (SMTP_HOST y SMTP_FROM/SMTP_USER son requeridas)",
+        "Variables de entorno de SendGrid incompletas (SENDGRID_API_KEY y SMTP_FROM son requeridas)",
       );
     }
 
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: user && pass ? { user, pass } : undefined,
-      connectionTimeout: 120000, // Increased to 120s for Railway
-      socketTimeout: 120000,
-      greetingTimeout: 60000,
-      debug: false,
-      logger: false,
-      // family: 4, // Intentionally left to auto-resolve on Railway
-      tls: {
-        rejectUnauthorized: false,
-        ciphers: "SSLv3", // Force compatible ciphers for strict railway networks
-      },
-    });
-
     logger.info(
-      `Cron: Configurando transporte SMTP: Host=${host}, Port=${port}, Secure=${secure}, User=${user}, To=${to}, Family=4`,
+      `Cron: Configurando transporte SendGrid para enviar a: To=${to}, From=${from}`,
     );
 
     const greeting = sellerName ? `Hola ${sellerName},` : "Hola,";
@@ -342,7 +324,7 @@ Equipo Adatex`;
 <p>Adjuntamos la lista de empaque y las facturas correspondientes a la orden <strong>${order.code}</strong>.</p>
 <p>Saludos,<br/>Equipo Adatex</p>`;
 
-    await transporter.sendMail({
+    await sgMail.send({
       from,
       to,
       bcc: "gerencia@adatex.co",
@@ -373,8 +355,9 @@ Equipo Adatex`;
         const pdfBuffer = await invoiceService.downloadInvoicePdf(siigoId);
         attachments.push({
           filename: buildName(type === "B" ? "AD" : "ADTX", invoiceNumber),
-          content: pdfBuffer,
-          contentType: "application/pdf",
+          content: pdfBuffer.toString("base64"),
+          type: "application/pdf",
+          disposition: "attachment",
         });
       } catch (error) {
         logger.warn("No se pudo adjuntar el PDF de la factura", {

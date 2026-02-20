@@ -40,5 +40,13 @@ module.exports = {
       method: "GET",
       handler: "order.downloadInvoice",
     },
+    {
+      method: "POST",
+      path: "/orders/test-email",
+      handler: "order.testEmail",
+      config: {
+        auth: false,
+      },
+    },
   ],
 };

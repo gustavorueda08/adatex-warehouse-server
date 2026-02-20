@@ -348,4 +348,41 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       });
     }
   },
+
+  async testEmail(ctx) {
+    try {
+      const { to } = ctx.request.body;
+      if (!to) {
+        return ctx.badRequest("Missing 'to' email address in body");
+      }
+
+      const order = await strapi.entityService.findOne("api::order.order", 1); // Mock order details
+
+      if (!order) {
+        return ctx.badRequest(
+          "Cannot find any baseline order to attach against",
+        );
+      }
+
+      const packingListNotifier = strapi.service(
+        "api::order.packing-list-notifier",
+      );
+
+      await packingListNotifier.sendPackingListEmail({
+        order,
+        to,
+        attachments: [],
+      });
+
+      return {
+        success: true,
+        message:
+          "SendGrid attempt dispatched. If successful, you should see 202 status on SendGrid dashboard.",
+      };
+    } catch (error) {
+      return ctx.internalServerError(
+        `SendGrid Delivery Failed: ${error.message}`,
+      );
+    }
+  },
 }));
