@@ -300,7 +300,7 @@ module.exports = ({ strapi }) => ({
     // Configurar API Key de SendGrid
     sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-    const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const from = process.env.SMTP_FROM || "info@adatex.com.co";
 
     if (!process.env.SENDGRID_API_KEY || !from) {
       throw new Error(
