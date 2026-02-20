@@ -41,7 +41,7 @@ module.exports = ({ strapi }) => ({
           (file) =>
             file.caption?.includes("Packing list") ||
             file.name?.includes("Packing list") ||
-            file.name?.startsWith("LE ")
+            file.name?.startsWith("LE "),
         );
 
         if (hasPackingList) {
@@ -62,18 +62,18 @@ module.exports = ({ strapi }) => ({
           }
         } catch (err) {
           logger.error(
-            `Cron: Error procesando orden ${order.code}: ${err.message}`
+            `Cron: Error procesando orden ${order.code}: ${err.message}`,
           );
         }
       }
 
       if (processedCount > 0) {
         logger.info(
-          `Cron: Enviadas ${processedCount} listas de empaque pendientes.`
+          `Cron: Enviadas ${processedCount} listas de empaque pendientes.`,
         );
       } else {
         logger.info(
-          "Cron: No se enviaron listas de empaque en esta ejecución."
+          "Cron: No se enviaron listas de empaque en esta ejecución.",
         );
       }
     } catch (error) {
@@ -97,7 +97,7 @@ module.exports = ({ strapi }) => ({
 
       if (!hasInvoices) {
         logger.warn(
-          `Cron: Orden ${order.code} omitida - No tiene facturas (A/B) registradas aún.`
+          `Cron: Orden ${order.code} omitida - No tiene facturas (A/B) registradas aún.`,
         );
         return false;
       }
@@ -105,14 +105,14 @@ module.exports = ({ strapi }) => ({
       const sellerInfo = extractSellerInfo(order);
       if (!sellerInfo) {
         logger.warn(
-          `Cron: Orden ${order.code} omitida - No se encontró información del seller (Check populate).`
+          `Cron: Orden ${order.code} omitida - No se encontró información del seller (Check populate).`,
         );
         return false;
       }
 
       if (!sellerInfo.email) {
         logger.warn(
-          `Cron: Orden ${order.code} omitida - El seller ${sellerInfo.name} no tiene email.`
+          `Cron: Orden ${order.code} omitida - El seller ${sellerInfo.name} no tiene email.`,
         );
         return false;
       }
@@ -120,11 +120,11 @@ module.exports = ({ strapi }) => ({
       // Verificar DE NUEVO si ya tiene el adjunto (por seguridad de concurrencia)
       const alreadyHasIt = order.attachments?.some(
         (file) =>
-          file.name.startsWith("LE ") || file.caption?.includes("Packing list")
+          file.name.startsWith("LE ") || file.caption?.includes("Packing list"),
       );
       if (alreadyHasIt) {
         logger.info(
-          `Cron: Orden ${order.code} omitida - Ya tiene lista de empaque.`
+          `Cron: Orden ${order.code} omitida - Ya tiene lista de empaque.`,
         );
         return false;
       }
@@ -135,7 +135,7 @@ module.exports = ({ strapi }) => ({
       logger.info(
         `Cron: PDF generado para orden ${order.code}. Duración: ${
           Date.now() - pdfStartTime
-        }ms`
+        }ms`,
       );
       const finalFileName = buildPackingListFileName(order);
 
@@ -153,7 +153,7 @@ module.exports = ({ strapi }) => ({
 
       if (existingFile) {
         logger.info(
-          `Cron: Reutilizando PDF existente (ID: ${existingFile.id}) para orden ${order.code}...`
+          `Cron: Reutilizando PDF existente (ID: ${existingFile.id}) para orden ${order.code}...`,
         );
         uploadedFile = existingFile;
       } else {
@@ -163,7 +163,7 @@ module.exports = ({ strapi }) => ({
         logger.info(
           `Cron: PDF subido para orden ${order.code}. Duración: ${
             Date.now() - uploadStartTime
-          }ms`
+          }ms`,
         );
       }
 
@@ -181,7 +181,7 @@ module.exports = ({ strapi }) => ({
       const emailSubject = buildEmailSubject(order);
 
       logger.info(
-        `Cron: Enviando email a ${sellerInfo.email} para orden ${order.code}. Inicio de envío...`
+        `Cron: Enviando email a ${sellerInfo.email} para orden ${order.code}. Inicio de envío...`,
       );
       const emailStartTime = Date.now();
       await this._sendEmailWithAttachment({
@@ -193,7 +193,7 @@ module.exports = ({ strapi }) => ({
       });
       const emailDuration = Date.now() - emailStartTime;
       logger.info(
-        `Cron: Email enviado a ${sellerInfo.email} para orden ${order.code}. Duración: ${emailDuration}ms`
+        `Cron: Email enviado a ${sellerInfo.email} para orden ${order.code}. Duración: ${emailDuration}ms`,
       );
 
       logger.info(`Cron: Vinculando adjunto a orden ${order.code}...`);
@@ -246,7 +246,7 @@ module.exports = ({ strapi }) => ({
   async _uploadPdf(buffer, fileName, order) {
     const uploadService = strapi.plugin("upload").service("upload");
     const tmpDir = await fs.mkdtemp(
-      path.join(os.tmpdir(), "packing-list-pdf-")
+      path.join(os.tmpdir(), "packing-list-pdf-"),
     );
     const tmpPath = path.join(tmpDir, fileName);
 
@@ -305,32 +305,29 @@ module.exports = ({ strapi }) => ({
 
     if (!host || !from) {
       throw new Error(
-        "Variables de entorno SMTP incompletas (SMTP_HOST y SMTP_FROM/SMTP_USER son requeridas)"
+        "Variables de entorno SMTP incompletas (SMTP_HOST y SMTP_FROM/SMTP_USER son requeridas)",
       );
     }
 
-    // FORCE DEBUG SETTINGS FOR TESTING
-    const debugPort = 465;
-    const debugSecure = true;
-
     const transporter = nodemailer.createTransport({
       host,
-      port: debugPort,
-      secure: debugSecure,
+      port,
+      secure,
       auth: user && pass ? { user, pass } : undefined,
-      connectionTimeout: 60000, // 60s
-      socketTimeout: 60000, // 60s
-      greetingTimeout: 30000, // 30s
-      debug: true,
-      logger: true,
-      family: 4, // Force IPv4 for Railway/Docker
+      connectionTimeout: 120000, // Increased to 120s for Railway
+      socketTimeout: 120000,
+      greetingTimeout: 60000,
+      debug: false,
+      logger: false,
+      // family: 4, // Intentionally left to auto-resolve on Railway
       tls: {
         rejectUnauthorized: false,
+        ciphers: "SSLv3", // Force compatible ciphers for strict railway networks
       },
     });
 
     logger.info(
-      `Cron: Configurando transporte SMTP (DEBUG FORCE v2): Host=${host}, Port=${debugPort}, Secure=${debugSecure}, User=${user}, To=${to}, Family=4`
+      `Cron: Configurando transporte SMTP: Host=${host}, Port=${port}, Secure=${secure}, User=${user}, To=${to}, Family=4`,
     );
 
     const greeting = sellerName ? `Hola ${sellerName},` : "Hola,";
@@ -364,7 +361,7 @@ Equipo Adatex`;
 
     const buildName = (prefix, invoiceNumber) =>
       sanitizeFileName(
-        `${prefix}-${invoiceNumber} - ${customerName} (${completedDate}).pdf`
+        `${prefix}-${invoiceNumber} - ${customerName} (${completedDate}).pdf`,
       );
 
     const collector = async ({ type, siigoId, invoiceNumber }) => {
@@ -408,7 +405,7 @@ Equipo Adatex`;
 
   async _linkAttachmentToOrder(orderId, fileId, order) {
     const currentAttachmentIds = (order.attachments || []).map(
-      (file) => file.id
+      (file) => file.id,
     );
 
     if (currentAttachmentIds.includes(fileId)) {
@@ -537,7 +534,7 @@ function buildPackingListFileName(order) {
   const completedDate = formatCompletedDate(order);
 
   return sanitizeFileName(
-    `LE ${invoiceLabel} - ${customerName} (${completedDate}).pdf`
+    `LE ${invoiceLabel} - ${customerName} (${completedDate}).pdf`,
   );
 }
 
