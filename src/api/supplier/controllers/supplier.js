@@ -52,7 +52,9 @@ module.exports = createCoreController(
           throw new Error("Los datos del proveedor son requeridos");
         }
 
-        const supplier = await supplierService.create(data.data);
+        console.log("DSFJSFJ", JSON.stringify(data.data));
+
+        const supplier = await supplierService.create({ data: data.data });
 
         if (!supplier) {
           throw new Error("Error al crear el proveedor");

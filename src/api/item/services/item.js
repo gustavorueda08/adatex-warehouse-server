@@ -60,7 +60,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           "orderProducts.order",
         ],
       },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
   },
 
@@ -91,7 +91,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           "orderProducts.order",
         ],
       },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
 
     if (items.length > 0) {
@@ -108,7 +108,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         },
         populate: ["item", "item.movements"],
       },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
 
     if (mappings.length === 0) {
@@ -120,7 +120,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       BARCODE_MAPPING_SERVICE,
       mappings[0].id,
       { data: { used: true } },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
 
     return mappings[0].item;
@@ -143,7 +143,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
     warehouseId = null,
     orderId = null,
     justAvailableItems = false,
-    trx = null
+    trx = null,
   ) {
     // Determinar la bodega de búsqueda
     let warehouse;
@@ -153,7 +153,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         {
           filters: { isDefault: true },
         },
-        trx ? { transacting: trx } : {}
+        trx ? { transacting: trx } : {},
       );
 
       if (warehouses.length > 0) {
@@ -164,13 +164,13 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         WAREHOUSE_SERVICE,
         warehouseId,
         {},
-        trx ? { transacting: trx } : {}
+        trx ? { transacting: trx } : {},
       );
     }
 
     if (!warehouse) {
       throw new Error(
-        "No se ha encontrado una bodega de origen para buscar el Item"
+        "No se ha encontrado una bodega de origen para buscar el Item",
       );
     }
 
@@ -192,12 +192,12 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           "warehouse",
         ],
       },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
 
     if (items.length === 0) {
       throw new Error(
-        "No se encontró ningún Item con los criterios especificados"
+        "No se encontró ningún Item con los criterios especificados",
       );
     }
 
@@ -223,7 +223,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           createdFromOrder: orderId,
         },
       },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
 
     return currentItem;
@@ -304,7 +304,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
     reverse,
     orderId,
     orderProductId,
-    recoveredWarehouse = null
+    recoveredWarehouse = null,
   ) {
     if (currentItem.state === updatedItem.state) {
       return null;
@@ -363,20 +363,79 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
 
       case ORDER_TYPES.OUT:
         if (reverse) {
-          return {
-            ...baseMovement,
-            type: IN,
-            destinationWarehouse:
-              updatedItem.warehouse?.id || updatedItem.warehouse,
-            reason:
-              "Cambio de estado a disponible por cancelación de orden de salida",
-          };
+          if (currentItem.state === ITEM_STATES.DROPPED) {
+            return {
+              ...baseMovement,
+              type: IN,
+              destinationWarehouse:
+                updatedItem.warehouse?.id || updatedItem.warehouse,
+              reason:
+                "Cambio de estado a disponible por cancelación de orden de salida",
+            };
+          } else {
+            return {
+              ...baseMovement,
+              type: UNRESERVE,
+              reason:
+                "Cambio de estado a disponible por cancelación de reserva de salida",
+            };
+          }
+        } else {
+          if (updatedItem.state === ITEM_STATES.DROPPED) {
+            return {
+              ...baseMovement,
+              type: OUT,
+              sourceWarehouse:
+                currentItem.warehouse?.id || currentItem.warehouse,
+              warehouse: null,
+              reason: "Cambio de estado a desechado por orden de salida",
+            };
+          } else if (updatedItem.state === ITEM_STATES.RESERVED) {
+            return {
+              ...baseMovement,
+              type: RESERVE,
+              reason: "Reserva por orden de salida",
+            };
+          }
+          return null;
         }
-        return {
-          ...baseMovement,
-          type: OUT,
-          reason: "Cambio de estado a desechado por orden de salida",
-        };
+
+      case ORDER_TYPES.TRANSFER:
+        if (reverse) {
+          if (
+            currentItem.state === ITEM_STATES.RESERVED &&
+            updatedItem.state === ITEM_STATES.AVAILABLE
+          ) {
+            return {
+              ...baseMovement,
+              type: UNRESERVE,
+              reason: "Cancelación de reserva de transferencia",
+            };
+          }
+        } else {
+          if (
+            currentItem.state === ITEM_STATES.AVAILABLE &&
+            updatedItem.state === ITEM_STATES.RESERVED
+          ) {
+            return {
+              ...baseMovement,
+              type: RESERVE,
+              reason: "Reserva para orden de transferencia",
+            };
+          } else if (
+            currentItem.state === ITEM_STATES.RESERVED &&
+            updatedItem.state === ITEM_STATES.AVAILABLE
+          ) {
+            // Se completó la transferencia (AVAILABLE a AVAILABLE pero en otra bodega se maneja en el warehouseChange)
+            // Solo creamos un UNRESERVE aquí para limpiar la reserva.
+            return {
+              ...baseMovement,
+              type: UNRESERVE,
+              reason: "Transferencia completada - liberación de reserva",
+            };
+          }
+        }
+        return null;
 
       default:
         return null;
@@ -404,7 +463,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         limit: 1,
         populate: ["sourceWarehouse"],
       },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
 
     if (movements.length > 0 && movements[0].sourceWarehouse) {
@@ -430,14 +489,14 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           createdFromOrder: orderId,
         },
       },
-      trx ? { transacting: trx } : {}
+      trx ? { transacting: trx } : {},
     );
 
     for (const mapping of barcodeMappingsToDelete) {
       await strapi.entityService.delete(
         BARCODE_MAPPING_SERVICE,
         mapping.id,
-        trx ? { transacting: trx } : {}
+        trx ? { transacting: trx } : {},
       );
     }
   },
@@ -482,7 +541,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           warehouse,
           order,
           justAvailableItems,
-          trx
+          trx,
         );
     }
 
@@ -532,19 +591,19 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
               data.quantity,
               data.lot,
               data.itemNumber,
-              data.containerCode
+              data.containerCode,
             ),
             alternativeBarcode: generateAlternativeItemBarcode(
               data.product.code,
               data.quantity,
-              data.containerCode
+              data.containerCode,
             ),
             itemNumber: data.itemNumber,
             cost: data.cost,
             state: ITEM_STATES.AVAILABLE,
           },
         },
-        data.trx ? { transacting: data.trx } : {}
+        data.trx ? { transacting: data.trx } : {},
       );
 
       if (!newItem) {
@@ -567,7 +626,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
             balanceAfter: data.quantity,
           },
         },
-        data.trx ? { transacting: data.trx } : {}
+        data.trx ? { transacting: data.trx } : {},
       );
 
       return newItem;
@@ -597,7 +656,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       const item = await strapi.entityService.findOne(
         ITEM_SERVICE,
         data.id,
-        data.trx ? { transacting: data.trx } : {}
+        data.trx ? { transacting: data.trx } : {},
       );
 
       // Crear movimiento de ajuste antes de eliminar
@@ -615,14 +674,14 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
             balanceAfter: 0,
           },
         },
-        data.trx ? { transacting: data.trx } : {}
+        data.trx ? { transacting: data.trx } : {},
       );
 
       // Eliminar el item
       await strapi.entityService.delete(
         ITEM_SERVICE,
         item.id,
-        data.trx ? { transacting: data.trx } : {}
+        data.trx ? { transacting: data.trx } : {},
       );
 
       return {
@@ -731,7 +790,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           data: dataToUpdate,
           populate: data.populate ? data.populate : ["warehouse"],
         },
-        data.trx ? { transacting: data.trx } : {}
+        data.trx ? { transacting: data.trx } : {},
       );
 
       // Detectar y procesar cambios para crear movimientos de inventario
@@ -752,7 +811,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           currentItem,
           updatedItem,
           order,
-          orderProduct
+          orderProduct,
         );
       if (warehouseChange) {
         changes.push(warehouseChange);
@@ -768,7 +827,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           reverse,
           order,
           orderProduct,
-          recoveredWarehouse
+          recoveredWarehouse,
         );
       if (stateChange) {
         changes.push(stateChange);
@@ -779,7 +838,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
         return await strapi.entityService.create(
           INVENTORY_MOVEMENT_SERVICE,
           { data: change },
-          data.trx ? { transacting: data.trx } : {}
+          data.trx ? { transacting: data.trx } : {},
         );
       });
       return { ...updatedItem, movements };

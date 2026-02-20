@@ -33,7 +33,7 @@ module.exports = createCoreController(
 
         const balance = await customerService.getConsignmentBalance(
           customerId,
-          filters
+          filters,
         );
 
         return {
@@ -76,7 +76,7 @@ module.exports = createCoreController(
 
         const history = await customerService.getConsignmentHistory(
           customerId,
-          options
+          options,
         );
 
         return {
@@ -221,5 +221,5 @@ module.exports = createCoreController(
         });
       }
     },
-  })
+  }),
 );

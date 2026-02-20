@@ -156,8 +156,24 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           if (!wType) return;
 
           if (wType === "stock") {
-            if (item.state === "available") stats.stock += qty;
-            if (item.state === "reserved") stats.reserved += qty;
+            if (item.state === "available") {
+              stats.stock += qty;
+            } else if (item.state === "reserved") {
+              // Only consider an item 'reserved' (meaning deducted from available stock)
+              // if it's tied to a 'sale' order. If it's for 'transfer' or 'out',
+              // it should effectively remain 'available' until the order is completed.
+              if (
+                !item.order ||
+                item.order.type === "sale" ||
+                item.order.type === "return"
+              ) {
+                stats.stock += qty;
+                stats.reserved += qty;
+              } else {
+                // For transfer or out draft orders, it acts like available stock since it's still there
+                stats.stock += qty;
+              }
+            }
           } else if (wType === "production") {
             stats.production += qty;
           } else if (wType === "transit") {
@@ -305,6 +321,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           warehouseId: null,
           state: "available", // Default start state
           productId: mov.item.product.id,
+          orderType: null, // Keep track of the reserving order's type
         };
       }
 
@@ -348,10 +365,14 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
         case RESERVE:
           currentItemState.state = "reserved";
+          if (mov.order) {
+            currentItemState.orderType = mov.order.type;
+          }
           break;
 
         case UNRESERVE:
           currentItemState.state = "available";
+          currentItemState.orderType = null;
           break;
 
         // ADJUSTMENT doesn't change warehouse usually, just quantity
@@ -392,8 +413,20 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           : null;
 
       if (wType === "stock") {
-        if (itemState.state === "available") stats.stock += qty;
-        if (itemState.state === "reserved") stats.reserved += qty;
+        if (itemState.state === "available") {
+          stats.stock += qty;
+        } else if (itemState.state === "reserved") {
+          if (
+            !itemState.orderType ||
+            itemState.orderType === "sale" ||
+            itemState.orderType === "return"
+          ) {
+            stats.stock += qty;
+            stats.reserved += qty;
+          } else {
+            stats.stock += qty;
+          }
+        }
       } else if (wType === "production") {
         stats.production += qty;
       } else if (wType === "transit") {
@@ -570,8 +603,20 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           const estTransit = sourceOrder?.estimatedTransitDate;
 
           if (wType === "stock") {
-            if (item.state === "available") stats.stock += qty;
-            if (item.state === "reserved") stats.reserved += qty;
+            if (item.state === "available") {
+              stats.stock += qty;
+            } else if (item.state === "reserved") {
+              if (
+                !item.order ||
+                item.order.type === "sale" ||
+                item.order.type === "return"
+              ) {
+                stats.stock += qty;
+                stats.reserved += qty;
+              } else {
+                stats.stock += qty;
+              }
+            }
           } else if (wType === "production") {
             if (isWithinRange(estCompleted)) {
               stats.arriving += qty;
@@ -686,6 +731,9 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
                 fields: ["type"],
               },
             },
+          },
+          order: {
+            fields: ["type"],
           },
         },
       },
@@ -849,6 +897,9 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         fields: ["currentQuantity", "state"],
         populate: {
           warehouse: {
+            fields: ["type"],
+          },
+          order: {
             fields: ["type"],
           },
         },

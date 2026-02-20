@@ -301,10 +301,9 @@ class OutStrategy extends ItemMovementStrategy {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
-        state: ITEM_STATES.DROPPED,
+        state: ITEM_STATES.RESERVED,
         order: order.id,
         orderProduct: orderProduct.id,
-        warehouse: null,
       },
       type: orderType,
       trx,
@@ -329,13 +328,25 @@ class OutStrategy extends ItemMovementStrategy {
   }
 
   async update({ item, order, orderProduct, trx, orderState, orderType }) {
+    const ORDER_STATES = require("../../../utils/orderStates");
+
+    let itemState = ITEM_STATES.RESERVED;
+    let itemWarehouse = item.warehouse?.id || item.warehouse;
+
+    if (orderState === ORDER_STATES.COMPLETED) {
+      itemState = ITEM_STATES.DROPPED;
+      itemWarehouse = null;
+    } else if (orderState === ORDER_STATES.CANCELLED) {
+      itemState = ITEM_STATES.AVAILABLE;
+    }
+
     return await this.itemService.update({
       id: item.id,
       update: {
-        state: ITEM_STATES.DROPPED,
+        state: itemState,
         order: order.id,
         orderProduct: orderProduct.id,
-        warehouse: null,
+        warehouse: itemWarehouse,
       },
       type: orderType,
       trx,
@@ -382,7 +393,7 @@ class TransferStrategy extends ItemMovementStrategy {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
-        warehouse: order.destinationWarehouse.id,
+        state: ITEM_STATES.RESERVED,
         order: order.id,
         orderProduct: orderProduct.id,
       },
@@ -410,10 +421,25 @@ class TransferStrategy extends ItemMovementStrategy {
   }
 
   async update({ item, order, orderProduct, trx, orderState, orderType }) {
+    const ORDER_STATES = require("../../../utils/orderStates");
+
+    let itemState = ITEM_STATES.RESERVED;
+    let targetWarehouse =
+      item.warehouse?.id || item.warehouse || order.sourceWarehouse?.id;
+
+    if (orderState === ORDER_STATES.COMPLETED) {
+      itemState = ITEM_STATES.AVAILABLE; // Unreserve when transfer is completed
+      targetWarehouse =
+        order.destinationWarehouse?.id || order.destinationWarehouse;
+    } else if (orderState === ORDER_STATES.CANCELLED) {
+      itemState = ITEM_STATES.AVAILABLE;
+    }
+
     return await this.itemService.update({
       id: item.id,
       update: {
-        warehouse: order.destinationWarehouse.id,
+        state: itemState,
+        warehouse: targetWarehouse,
         order: order.id,
         orderProduct: orderProduct.id,
       },
@@ -434,7 +460,12 @@ class TransferStrategy extends ItemMovementStrategy {
     return await this.itemService.update({
       id: item.id,
       reverse: true,
-      update: { warehouse: order.sourceWarehouse.id },
+      update: {
+        state: ITEM_STATES.AVAILABLE,
+        warehouse: order.sourceWarehouse?.id || order.sourceWarehouse,
+        order: order.id,
+        orderProduct: orderProduct.id,
+      },
       type: orderType,
       trx,
     });
@@ -609,7 +640,7 @@ class TransformStrategy extends ItemMovementStrategy {
       sourceOrder: order.id,
       // IMPORTANTE: Conectar también la relación many-to-many 'orders'
       orders: { connect: [order.id] },
-      orderProduct: orderProduct.id,
+      orderProducts: { connect: [orderProduct.id] },
       product: product.id,
       lotNumber: item.lotNumber || sourceItem.lotNumber,
       itemNumber: item.itemNumber,

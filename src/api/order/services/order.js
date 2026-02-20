@@ -65,7 +65,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
           if (!validation.valid) {
             throw new Error(
-              `Orden partial-invoice inválida:\n- ${validation.errors.join("\n- ")}`
+              `Orden partial-invoice inválida:\n- ${validation.errors.join("\n- ")}`,
             );
           }
 
@@ -112,16 +112,19 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
               // Procesar Items
               if (items.length > 0) {
-                await runInBatches(items, (item) =>
-                  strapi.service(ORDER_SERVICE).doItemMovement({
-                    movementType: ITEM_MOVEMENT_TYPES.CREATE,
-                    item,
-                    order,
-                    orderProduct,
-                    product,
-                    orderState: order.state,
-                    trx,
-                  })
+                await runInBatches(
+                  items,
+                  (item) =>
+                    strapi.service(ORDER_SERVICE).doItemMovement({
+                      movementType: ITEM_MOVEMENT_TYPES.CREATE,
+                      item,
+                      order,
+                      orderProduct,
+                      product,
+                      orderState: order.state,
+                      trx,
+                    }),
+                  1,
                 );
               }
 
@@ -131,14 +134,14 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                 orderState: order.state,
                 trx,
               });
-            }
+            },
           );
 
           // Obtención del Order totalmente actualizado con todos los populates
           const updatedOrder = await strapi.entityService.findOne(
             ORDER_SERVICE,
             order.id,
-            { populate: ORDER_POPULATE, transacting: trx }
+            { populate: ORDER_POPULATE, transacting: trx },
           );
 
           // Emitir evento WebSocket
@@ -186,7 +189,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "sourceWarehouse",
             ],
             transacting: trx,
-          }
+          },
         );
 
         if (!currentOrder) {
@@ -207,7 +210,8 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             products,
             orderState,
             orderProductService,
-            trx
+            trx,
+            update.destinationWarehouse,
           );
         }
 
@@ -219,7 +223,19 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             products,
             orderState,
             orderProductService,
-            trx
+            trx,
+          );
+        }
+
+        // Si el estado de la orden cambió, pero no se enviaron productos
+        // Asegurar que los items existentes se actualicen (ej. para recibir destinationWarehouse)
+        if (!data.products && currentOrder.state !== orderState) {
+          await updateExistingOrderProducts(
+            strapi,
+            currentOrder,
+            orderState,
+            trx,
+            update.destinationWarehouse,
           );
         }
 
@@ -253,12 +269,12 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                 }
               } else {
                 logger.warn(
-                  `No se encontró factura con número ${num} en Siigo`
+                  `No se encontró factura con número ${num} en Siigo`,
                 );
               }
             } catch (err) {
               logger.warn(
-                `Error buscando factura manual ${num}: ${err.message}`
+                `Error buscando factura manual ${num}: ${err.message}`,
               );
             }
           }
@@ -278,7 +294,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             // (aunque ya no deberíamos depender de eso, pero el frontend puede usarlo)
             const firstInv = await strapi.entityService.findOne(
               "api::invoice.invoice",
-              foundInvoicesIds[0]
+              foundInvoicesIds[0],
             );
             if (firstInv) {
               if (!update.invoiceNumber) update.invoiceNumber = firstInv.number;
@@ -324,7 +340,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             data: update,
             populate: ORDER_POPULATE,
             transacting: trx,
-          }
+          },
         );
 
         // Emitir evento WebSocket
@@ -362,7 +378,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "sourceWarehouse",
             ],
             transacting: trx,
-          }
+          },
         );
 
         if (!currentOrder) {
@@ -377,14 +393,17 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           const items = orderProduct.items;
 
           // Eliminar o revertir items
-          await runInBatches(items, (item) =>
-            strapi.service(ORDER_SERVICE).doItemMovement({
-              movementType: ITEM_MOVEMENT_TYPES.DELETE,
-              item,
-              order: currentOrder,
-              orderProduct,
-              trx,
-            })
+          await runInBatches(
+            items,
+            (item) =>
+              strapi.service(ORDER_SERVICE).doItemMovement({
+                movementType: ITEM_MOVEMENT_TYPES.DELETE,
+                item,
+                order: currentOrder,
+                orderProduct,
+                trx,
+              }),
+            1,
           );
 
           // Eliminar OrderProduct
@@ -436,7 +455,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
       // Obtener la estrategia correcta según el tipo de orden
       const strategy = ItemMovementStrategyFactory.getStrategy(
         orderType,
-        itemService
+        itemService,
       );
 
       // Ejecutar la operación correspondiente
@@ -511,7 +530,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "destinationWarehouse",
             ],
             transacting: trx,
-          }
+          },
         );
 
         if (!currentOrder) {
@@ -520,9 +539,22 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         validateOrderIsEditable(currentOrder);
 
+        // Auto-transition DRAFT to CONFIRMED for sale and out orders
+        if (
+          currentOrder.state === ORDER_STATES.DRAFT &&
+          (currentOrder.type === ORDER_TYPES.SALE ||
+            currentOrder.type === ORDER_TYPES.OUT)
+        ) {
+          currentOrder.state = ORDER_STATES.CONFIRMED;
+          await strapi.entityService.update(ORDER_SERVICE, currentOrder.id, {
+            data: { state: currentOrder.state },
+            transacting: trx,
+          });
+        }
+
         // Obtención del OrderProduct actual para el Item
         let orderProductData = currentOrder.orderProducts.find(
-          (op) => op.product.id === productId
+          (op) => op.product.id === productId,
         );
 
         let product;
@@ -533,7 +565,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           product = await strapi.entityService.findOne(
             PRODUCT_SERVICE,
             productId,
-            { transacting: trx }
+            { transacting: trx },
           );
 
           if (!product) {
@@ -610,7 +642,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "orderProducts.items",
             ],
             transacting: trx,
-          }
+          },
         );
 
         if (!currentOrder) {
@@ -635,7 +667,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         // Obtención del OrderProduct que contiene el Item
         const orderProduct = currentOrder.orderProducts.find(
-          (op) => op.product.id == item.product.id
+          (op) => op.product.id == item.product.id,
         );
 
         if (!orderProduct) {
@@ -652,6 +684,29 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           orderState: currentOrder.state,
           trx,
         });
+
+        // Count remaining items across all orderProducts
+        let totalItemsLeft = 0;
+        for (const op of currentOrder.orderProducts) {
+          const itemsLeft = op.items
+            ? op.items.filter((i) => i.id !== removedItem.id).length
+            : 0;
+          totalItemsLeft += itemsLeft;
+        }
+
+        // Auto-transition CONFIRMED to DRAFT if order is now empty
+        if (
+          totalItemsLeft === 0 &&
+          currentOrder.state === ORDER_STATES.CONFIRMED &&
+          (currentOrder.type === ORDER_TYPES.SALE ||
+            currentOrder.type === ORDER_TYPES.OUT)
+        ) {
+          currentOrder.state = ORDER_STATES.DRAFT;
+          await strapi.entityService.update(ORDER_SERVICE, currentOrder.id, {
+            data: { state: ORDER_STATES.DRAFT },
+            transacting: trx,
+          });
+        }
 
         // Actualizar OrderProduct
         await orderProductService.update({
