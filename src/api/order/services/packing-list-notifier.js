@@ -300,9 +300,17 @@ module.exports = ({ strapi }) => ({
     // Configurar API Key de SendGrid
     sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-    const from = process.env.SMTP_FROM || "info@adatex.com.co";
+    let rawFrom = process.env.SMTP_FROM || "info@adatex.com.co";
+    // Si viene en formato "Adatex <info@adatex.com.co>", usar formato extendido
+    const match = rawFrom.match(/(.*)<(.*)>/);
+    const from = match
+      ? {
+          name: match[1].trim(),
+          email: match[2].trim(),
+        }
+      : rawFrom;
 
-    if (!process.env.SENDGRID_API_KEY || !from) {
+    if (!process.env.SENDGRID_API_KEY || !rawFrom) {
       throw new Error(
         "Variables de entorno de SendGrid incompletas (SENDGRID_API_KEY y SMTP_FROM son requeridas)",
       );
@@ -324,15 +332,24 @@ Equipo Adatex`;
 <p>Adjuntamos la lista de empaque y las facturas correspondientes a la orden <strong>${order.code}</strong>.</p>
 <p>Saludos,<br/>Equipo Adatex</p>`;
 
-    await sgMail.send({
-      from,
-      to,
-      bcc: "gerencia@adatex.co",
-      subject,
-      text,
-      html,
-      attachments,
-    });
+    try {
+      await sgMail.send({
+        from,
+        to,
+        bcc: "gerencia@adatex.co",
+        subject,
+        text,
+        html,
+        attachments,
+      });
+    } catch (sendError) {
+      if (sendError.response && sendError.response.body) {
+        logger.error(
+          `Cron: Error en SendGrid API: ${JSON.stringify(sendError.response.body)}`,
+        );
+      }
+      throw sendError;
+    }
   },
 
   async _buildInvoiceAttachments(order) {
