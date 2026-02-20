@@ -208,7 +208,10 @@ const updateOrderProducts = async (
           productData.notes || "Producto agregado en actualización de orden",
         price: parseFloat(productData.price) || 0,
         ivaIncluded: productData.ivaIncluded || false,
-        invoicePercentage: productData.invoicePercentage || 100,
+        invoicePercentage:
+          typeof productData.invoicePercentage === "number"
+            ? productData.invoicePercentage
+            : 100,
         trx,
       });
 

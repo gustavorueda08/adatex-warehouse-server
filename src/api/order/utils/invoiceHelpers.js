@@ -471,7 +471,10 @@ function splitOrderProductsForDualInvoices(order) {
 
   // Procesar cada orderProduct
   for (const orderProduct of orderProducts) {
-    const invoicePercentage = orderProduct.invoicePercentage || 100;
+    const invoicePercentage =
+      typeof orderProduct.invoicePercentage === "number"
+        ? orderProduct.invoicePercentage
+        : 100;
     const confirmedQty = orderProduct.confirmedQuantity || 0;
 
     // Calcular cantidad para factura tipo A (porcentaje especificado)
