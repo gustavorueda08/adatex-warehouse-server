@@ -1013,6 +1013,10 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
       'manyToMany',
       'api::supplier.supplier'
     >;
+    type: Schema.Attribute.Enumeration<
+      ['variableQuantityRoll', 'fixedQuantityRoll', 'unit', 'cut']
+    > &
+      Schema.Attribute.DefaultTo<'variableQuantityRoll'>;
     unit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']>;
     unitsPerPackage: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<1>;
     updatedAt: Schema.Attribute.DateTime;
@@ -1227,8 +1231,9 @@ export interface ApiWarehouseWarehouse extends Struct.CollectionTypeSchema {
     >;
     sourceOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
     type: Schema.Attribute.Enumeration<
-      ['stock', 'transit', 'production', 'defective', 'printlab']
-    >;
+      ['stock', 'smartCut', 'transit', 'production', 'defective', 'printlab']
+    > &
+      Schema.Attribute.DefaultTo<'stock'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

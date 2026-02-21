@@ -770,7 +770,8 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
       let recoveredWarehouse = null;
       if (
         reverse &&
-        currentItem.state === ITEM_STATES.SOLD &&
+        (currentItem.state === ITEM_STATES.SOLD ||
+          currentItem.state === ITEM_STATES.DROPPED) &&
         !currentItem.warehouse
       ) {
         recoveredWarehouse = await strapi

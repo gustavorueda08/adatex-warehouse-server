@@ -6,6 +6,7 @@
 const ORDER_TYPES = require("../../../utils/orderTypes");
 const ITEM_STATES = require("../../../utils/itemStates");
 const ITEM_MOVEMENT_TYPES = require("../../../utils/itemMovementTypes");
+const ORDER_STATES = require("../../../utils/orderStates");
 
 /**
  * Estrategia base para movimientos de items
@@ -295,15 +296,23 @@ class OutStrategy extends ItemMovementStrategy {
     orderProduct,
     trx,
     orderType,
+    orderState,
     parentItem,
     product,
   }) {
     // En addItem puede llegar: barcode, id, o quantity+product
     const updatePayload = {
       update: {
-        state: ITEM_STATES.RESERVED,
+        state:
+          order.state == ORDER_STATES.COMPLETED
+            ? ITEM_STATES.DROPPED
+            : ITEM_STATES.RESERVED,
         order: order.id,
         orderProduct: orderProduct.id,
+        warehouse:
+          order.state == ORDER_STATES.COMPLETED
+            ? null
+            : item.warehouse?.id || item.warehouse,
       },
       type: orderType,
       trx,

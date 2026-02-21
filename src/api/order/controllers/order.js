@@ -15,11 +15,11 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
     try {
       const orderService = strapi.service(ORDER_SERVICE);
       const data = ctx.request.body;
+
       if (!data?.data) {
         throw new Error("Los datos de la orden son requeridos");
       }
-      console.log(JSON.stringify(data.data), "DATOOOOOSSSS");
-
+      console.log(JSON.stringify(data.data), "DATA EN EL CONTROLLER");
       const order = await orderService.create(data.data);
       if (!order) {
         throw new Error("Error al crear la orden");

@@ -94,6 +94,16 @@
     "hasVariableQuantity": {
       "type": "boolean",
       "default": true
+    },
+    "type": {
+      "type": "enumeration",
+      "default": "variableQuantityRoll",
+      "enum": [
+        "variableQuantityRoll",
+        "fixedQuantityRoll",
+        "unit",
+        "cut"
+      ]
     }
   }
 }

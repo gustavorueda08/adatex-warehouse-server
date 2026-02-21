@@ -21,8 +21,10 @@
     },
     "type": {
       "type": "enumeration",
+      "default": "stock",
       "enum": [
         "stock",
+        "smartCut",
         "transit",
         "production",
         "defective",
