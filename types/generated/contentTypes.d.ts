@@ -973,12 +973,12 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
     draftAndPublish: false;
   };
   attributes: {
-    barcode: Schema.Attribute.UID & Schema.Attribute.Required;
+    barcode: Schema.Attribute.UID;
     category: Schema.Attribute.Enumeration<
       ['Confeccion', 'Tapiceria', 'PrintLab']
     > &
       Schema.Attribute.DefaultTo<'Confeccion'>;
-    code: Schema.Attribute.UID & Schema.Attribute.Required;
+    code: Schema.Attribute.UID;
     collections: Schema.Attribute.Relation<
       'manyToMany',
       'api::collection.collection'
@@ -986,6 +986,8 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    defaultCutProduct: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     description: Schema.Attribute.Text;
     hasVariableQuantity: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<true>;
@@ -1006,17 +1008,29 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::order-product.order-product'
     >;
+    parentProduct: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::product.product'
+    >;
     priceList: Schema.Attribute.Relation<'oneToMany', 'api::price.price'>;
+    productsForCuts: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::product.product'
+    >;
     publishedAt: Schema.Attribute.DateTime;
     siigoId: Schema.Attribute.UID;
     suppliers: Schema.Attribute.Relation<
       'manyToMany',
       'api::supplier.supplier'
     >;
+    transformationFactor: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::transformation-factor.transformation-factor'
+    >;
     type: Schema.Attribute.Enumeration<
-      ['variableQuantityRoll', 'fixedQuantityRoll', 'unit', 'cut']
+      ['variableQuantityPerItem', 'fixedQuantityPerItem', 'cutItem']
     > &
-      Schema.Attribute.DefaultTo<'variableQuantityRoll'>;
+      Schema.Attribute.DefaultTo<'variableQuantityPerItem'>;
     unit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']>;
     unitsPerPackage: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<1>;
     updatedAt: Schema.Attribute.DateTime;
@@ -1184,6 +1198,44 @@ export interface ApiTerritoryTerritory extends Struct.CollectionTypeSchema {
     state: Schema.Attribute.String &
       Schema.Attribute.DefaultTo<'Valle del Cauca'>;
     stateCode: Schema.Attribute.String & Schema.Attribute.DefaultTo<'76'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiTransformationFactorTransformationFactor
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'transformation_factors';
+  info: {
+    description: 'Rules for converting quantities between products of different units';
+    displayName: 'Transformation Factor';
+    pluralName: 'transformation-factors';
+    singularName: 'transformation-factor';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    destinationUnit: Schema.Attribute.Enumeration<
+      ['kg', 'm', 'unit', 'piece']
+    > &
+      Schema.Attribute.Required;
+    factor: Schema.Attribute.Decimal & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::transformation-factor.transformation-factor'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    products: Schema.Attribute.Relation<'oneToMany', 'api::product.product'>;
+    publishedAt: Schema.Attribute.DateTime;
+    sourceUnit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']> &
+      Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1794,6 +1846,7 @@ declare module '@strapi/strapi' {
       'api::supplier.supplier': ApiSupplierSupplier;
       'api::tax.tax': ApiTaxTax;
       'api::territory.territory': ApiTerritoryTerritory;
+      'api::transformation-factor.transformation-factor': ApiTransformationFactorTransformationFactor;
       'api::warehouse.warehouse': ApiWarehouseWarehouse;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;

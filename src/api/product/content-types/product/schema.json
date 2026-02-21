@@ -16,20 +16,14 @@
       "required": true
     },
     "code": {
-      "type": "uid",
-      "required": true
+      "type": "uid"
     },
     "description": {
       "type": "text"
     },
     "unit": {
       "type": "enumeration",
-      "enum": [
-        "kg",
-        "m",
-        "unit",
-        "piece"
-      ]
+      "enum": ["kg", "m", "unit", "piece"]
     },
     "isActive": {
       "type": "boolean",
@@ -67,17 +61,12 @@
       "default": 1
     },
     "barcode": {
-      "type": "uid",
-      "required": true
+      "type": "uid"
     },
     "category": {
       "type": "enumeration",
       "default": "Confeccion",
-      "enum": [
-        "Confeccion",
-        "Tapiceria",
-        "PrintLab"
-      ]
+      "enum": ["Confeccion", "Tapiceria", "PrintLab"]
     },
     "collections": {
       "type": "relation",
@@ -97,13 +86,30 @@
     },
     "type": {
       "type": "enumeration",
-      "default": "variableQuantityRoll",
-      "enum": [
-        "variableQuantityRoll",
-        "fixedQuantityRoll",
-        "unit",
-        "cut"
-      ]
+      "default": "variableQuantityPerItem",
+      "enum": ["variableQuantityPerItem", "fixedQuantityPerItem", "cutItem"]
+    },
+    "productsForCuts": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::product.product",
+      "mappedBy": "parentProduct"
+    },
+    "parentProduct": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::product.product",
+      "inversedBy": "productsForCuts"
+    },
+    "defaultCutProduct": {
+      "type": "boolean",
+      "default": false
+    },
+    "transformationFactor": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::transformation-factor.transformation-factor",
+      "inversedBy": "products"
     }
   }
 }

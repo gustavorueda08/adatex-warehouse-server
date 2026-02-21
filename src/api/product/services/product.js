@@ -16,25 +16,92 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
    * @returns {Object} Created product
    */
   async create(data) {
-    const { collections = [], hideFor = [], ...rest } = data;
+    const {
+      collections = [],
+      hideFor = [],
+      transformationFactors = [],
+      productsForCuts = [],
+      ...rest
+    } = data;
 
-    const createData = {
-      ...rest,
-    };
+    return strapi.db.transaction(async (trx) => {
+      const createData = {
+        ...rest,
+      };
 
-    if (collections.length > 0) {
-      createData.collections = { connect: collections };
-    }
+      if (collections.length > 0) {
+        createData.collections = { connect: collections };
+      }
 
-    if (hideFor.length > 0) {
-      createData.hideFor = { connect: hideFor };
-    }
+      if (hideFor.length > 0) {
+        createData.hideFor = { connect: hideFor };
+      }
 
-    const newProduct = await strapi.entityService.create(SERVICE_UID, {
-      data: createData,
+      // Handle on-the-fly TransformationFactors creation/association
+      // Since it's Many-to-One from Product -> TransformationFactor, we assume Product links to the FIRST factor in the array logic, or the UI is just sending an array for UI convenience.
+      // E.g. If frontend sends `[ { id: 1 }, { name: 'New Factor', factor: 5... } ]`
+      // Wait, TransformationFactor is a Many-ToOne relation on Product (a Product has ONE TransformationFactor, a Factor has MANY Products).
+      // However, if the user requested sending an array "transformationFactors", we'll process the array. If the schema is Many-to-One, we connect the last processed valid factor.
+      let finalFactorId = null;
+      if (
+        Array.isArray(transformationFactors) &&
+        transformationFactors.length > 0
+      ) {
+        for (const tf of transformationFactors) {
+          if (tf.id) {
+            // Validate it exists
+            const existingTf = await strapi.entityService.findOne(
+              "api::transformation-factor.transformation-factor",
+              tf.id,
+              { transacting: trx },
+            );
+            if (existingTf) finalFactorId = existingTf.id;
+          } else if (
+            tf.name &&
+            tf.factor &&
+            tf.sourceUnit &&
+            tf.destinationUnit
+          ) {
+            // Create it on the fly
+            const newTf = await strapi.entityService.create(
+              "api::transformation-factor.transformation-factor",
+              {
+                data: {
+                  name: tf.name,
+                  sourceUnit: tf.sourceUnit,
+                  destinationUnit: tf.destinationUnit,
+                  factor: tf.factor,
+                },
+                transacting: trx,
+              },
+            );
+            finalFactorId = newTf.id;
+          }
+        }
+      }
+
+      if (finalFactorId) {
+        createData.transformationFactor = { connect: [finalFactorId] };
+      }
+
+      // Handle productsForCuts associations
+      // According to schema, productsForCuts is a One-to-Many relation mapped by parentProduct.
+      // So if creating THIS product assigns children, we need to connect them.
+      if (Array.isArray(productsForCuts) && productsForCuts.length > 0) {
+        createData.productsForCuts = {
+          connect: productsForCuts
+            .map((p) => (typeof p === "object" ? p.id : p))
+            .filter(Boolean),
+        };
+      }
+
+      const newProduct = await strapi.entityService.create(SERVICE_UID, {
+        data: createData,
+        transacting: trx,
+      });
+
+      return newProduct;
     });
-
-    return newProduct;
   },
 
   /**
@@ -44,14 +111,25 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
    * @returns {Object} Updated product
    */
   async update(id, data) {
-    const { collections = [], hideFor = [], ...rest } = data;
+    const {
+      collections = [],
+      hideFor = [],
+      transformationFactors = [],
+      productsForCuts = [],
+      ...rest
+    } = data;
 
     return strapi.db.transaction(async (trx) => {
       const currentProduct = await strapi.entityService.findOne(
         SERVICE_UID,
         id,
         {
-          populate: ["collections", "hideFor"],
+          populate: [
+            "collections",
+            "hideFor",
+            "transformationFactor",
+            "productsForCuts",
+          ],
         },
         { transacting: trx },
       );
@@ -82,6 +160,65 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           disconnect: hideForToRemove,
         },
       };
+
+      // Handle on-the-fly TransformationFactors creation/association
+      let finalFactorId = null;
+      if (
+        Array.isArray(transformationFactors) &&
+        transformationFactors.length > 0
+      ) {
+        for (const tf of transformationFactors) {
+          if (tf.id) {
+            const existingTf = await strapi.entityService.findOne(
+              "api::transformation-factor.transformation-factor",
+              tf.id,
+              { transacting: trx },
+            );
+            if (existingTf) finalFactorId = existingTf.id;
+          } else if (
+            tf.name &&
+            tf.factor &&
+            tf.sourceUnit &&
+            tf.destinationUnit
+          ) {
+            const newTf = await strapi.entityService.create(
+              "api::transformation-factor.transformation-factor",
+              {
+                data: {
+                  name: tf.name,
+                  sourceUnit: tf.sourceUnit,
+                  destinationUnit: tf.destinationUnit,
+                  factor: tf.factor,
+                },
+                transacting: trx,
+              },
+            );
+            finalFactorId = newTf.id;
+          }
+        }
+      }
+
+      if (finalFactorId) {
+        // If the product already has one, the API will overwrite it.
+        updateData.transformationFactor = { connect: [finalFactorId] };
+      }
+
+      const currentProductsForCuts =
+        currentProduct.productsForCuts?.map((p) => p.id) || [];
+      if (Array.isArray(productsForCuts) && productsForCuts.length > 0) {
+        const incomingProductsForCuts = productsForCuts
+          .map((p) => (typeof p === "object" ? p.id : p))
+          .filter(Boolean);
+        const { toAdd: pfcToAdd, toRemove: pfcToRemove } =
+          compareRelationArrays(
+            currentProductsForCuts,
+            incomingProductsForCuts,
+          );
+        updateData.productsForCuts = {
+          connect: pfcToAdd,
+          disconnect: pfcToRemove,
+        };
+      }
 
       const updatedProduct = await strapi.entityService.update(
         SERVICE_UID,
@@ -978,7 +1115,16 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           throw new Error("Cada producto debe ser un objeto");
         }
 
-        const { id, collections, hideFor, ...data } = productInput;
+        const {
+          id,
+          collections,
+          hideFor,
+          transformationFactors,
+          productsForCuts,
+          ...restData
+        } = productInput;
+        // Keep a mutable data object for injection
+        let data = { ...restData };
 
         // ── Resolve collections by name ──
         if (Array.isArray(collections)) {
@@ -1027,6 +1173,54 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           }
           if (userIds.length > 0) {
             data.hideFor = { set: userIds };
+          }
+        }
+
+        // ── Resolve transformationFactors ──
+        let finalFactorId = null;
+        if (
+          Array.isArray(transformationFactors) &&
+          transformationFactors.length > 0
+        ) {
+          for (const tf of transformationFactors) {
+            if (tf.id) {
+              const existingTf = await strapi.entityService.findOne(
+                "api::transformation-factor.transformation-factor",
+                tf.id,
+              );
+              if (existingTf) finalFactorId = existingTf.id;
+            } else if (
+              tf.name &&
+              tf.factor &&
+              tf.sourceUnit &&
+              tf.destinationUnit
+            ) {
+              const newTf = await strapi.entityService.create(
+                "api::transformation-factor.transformation-factor",
+                {
+                  data: {
+                    name: tf.name,
+                    sourceUnit: tf.sourceUnit,
+                    destinationUnit: tf.destinationUnit,
+                    factor: tf.factor,
+                  },
+                },
+              );
+              finalFactorId = newTf.id;
+            }
+          }
+        }
+        if (finalFactorId) {
+          data.transformationFactor = { set: [finalFactorId] }; // set overrides the existing relation in entityService create/update without trx disconnect blocks
+        }
+
+        // ── Resolve productsForCuts ──
+        if (Array.isArray(productsForCuts)) {
+          const incomingIds = productsForCuts
+            .map((p) => (typeof p === "object" ? p.id : p))
+            .filter(Boolean);
+          if (incomingIds.length > 0) {
+            data.productsForCuts = { set: incomingIds };
           }
         }
 

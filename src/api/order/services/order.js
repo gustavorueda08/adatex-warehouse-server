@@ -552,26 +552,26 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           });
         }
 
-        // Obtención del OrderProduct actual para el Item
         let orderProductData = currentOrder.orderProducts.find(
           (op) => op.product.id === productId,
         );
 
-        let product;
+        // Siempre obtener el producto completo para tener las relaciones necesarias (parentProduct, transformationFactor)
+        const product = await strapi.entityService.findOne(
+          require("../../../utils/services").PRODUCT_SERVICE,
+          productId,
+          {
+            populate: ["parentProduct", "transformationFactor"],
+            transacting: trx,
+          },
+        );
+
+        if (!product) {
+          throw new Error("El producto no existe");
+        }
+
         let orderProduct;
-
         if (!orderProductData) {
-          // Obtener el producto
-          product = await strapi.entityService.findOne(
-            PRODUCT_SERVICE,
-            productId,
-            { transacting: trx },
-          );
-
-          if (!product) {
-            throw new Error("El producto no existe");
-          }
-
           // Crear OrderProduct
           orderProduct = await orderProductService.create({
             product: product.id,
@@ -582,20 +582,190 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             trx,
           });
         } else {
-          product = orderProductData.product;
           orderProduct = orderProductData;
         }
 
-        // Agregar el item
-        const addedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
-          movementType: ITEM_MOVEMENT_TYPES.CREATE,
-          item,
-          order: currentOrder,
-          orderProduct,
-          product,
-          orderState: currentOrder.state,
-          trx,
-        });
+        let addedItemsList = [];
+
+        if (
+          product.type === "fixedQuantityPerItem" &&
+          item.count !== undefined
+        ) {
+          const resolveWarehouse = () => {
+            return item.warehouse || currentOrder.sourceWarehouse?.id || null;
+          };
+
+          let filters = {
+            product: product.id,
+            state: require("../../../utils/itemStates").AVAILABLE,
+          };
+          const whId = resolveWarehouse();
+          if (whId) filters.warehouse = whId;
+
+          const availableItems = await strapi.entityService.findMany(
+            require("../../../utils/services").ITEM_SERVICE,
+            {
+              filters,
+              limit: item.count,
+              transacting: trx,
+            },
+          );
+
+          if (availableItems.length < item.count) {
+            throw new Error(
+              `No hay suficientes items disponibles para ${product.name}. Solicitados: ${item.count}, Disponibles: ${availableItems.length}`,
+            );
+          }
+
+          for (const aItem of availableItems) {
+            const addedItem = await strapi
+              .service(ORDER_SERVICE)
+              .doItemMovement({
+                movementType: ITEM_MOVEMENT_TYPES.CREATE,
+                item: aItem,
+                order: currentOrder,
+                orderProduct,
+                product,
+                orderState: currentOrder.state,
+                trx,
+              });
+            addedItemsList.push(addedItem);
+          }
+        } else if (
+          product.type === "cutItem" &&
+          (item.quantity !== undefined || item.quantities !== undefined)
+        ) {
+          const quantities = Array.isArray(item.quantities)
+            ? item.quantities
+            : [item.quantity];
+
+          if (!product.parentProduct) {
+            throw new Error(
+              `El producto ${product.name} es type cutItem pero no tiene parentProduct configurado.`,
+            );
+          }
+
+          let factor = 1;
+          let multiplySource = false;
+          if (product.transformationFactor) {
+            factor = parseFloat(product.transformationFactor.factor) || 1;
+            if (
+              product.transformationFactor.sourceUnit ===
+                product.parentProduct.unit &&
+              product.transformationFactor.destinationUnit === product.unit
+            ) {
+              multiplySource = false;
+            } else if (
+              product.transformationFactor.sourceUnit === product.unit &&
+              product.transformationFactor.destinationUnit ===
+                product.parentProduct.unit
+            ) {
+              multiplySource = true;
+            }
+          }
+
+          const smartCutWarehouses = await strapi.entityService.findMany(
+            require("../../../utils/services").WAREHOUSE_SERVICE,
+            {
+              filters: { type: "smartCut", isActive: true },
+              transacting: trx,
+            },
+          );
+
+          if (smartCutWarehouses.length === 0) {
+            throw new Error("No hay bodegas configuradas como smartCut");
+          }
+          const smartCutWhIds = smartCutWarehouses.map((w) => w.id);
+
+          for (const targetQty of quantities) {
+            let sourceQuantityConsumed = parseFloat(targetQty);
+            if (factor !== 1) {
+              sourceQuantityConsumed = multiplySource
+                ? sourceQuantityConsumed * factor
+                : sourceQuantityConsumed / factor;
+            }
+
+            const availableParentItems = await strapi.entityService.findMany(
+              require("../../../utils/services").ITEM_SERVICE,
+              {
+                filters: {
+                  product: product.parentProduct.id,
+                  state: require("../../../utils/itemStates").AVAILABLE,
+                  warehouse: { $in: smartCutWhIds },
+                },
+                sort: { currentQuantity: "desc" },
+                limit: 1,
+                populate: ["warehouse", "product"],
+                transacting: trx,
+              },
+            );
+
+            if (availableParentItems.length === 0) {
+              throw new Error(
+                `No hay items de ${product.parentProduct.name} disponibles en bodegas smartCut para cortar.`,
+              );
+            }
+
+            const sourceItem = availableParentItems[0];
+
+            if (sourceItem.currentQuantity < sourceQuantityConsumed) {
+              if (!item.confirmNegativeStock) {
+                throw new Error(
+                  JSON.stringify({
+                    code: "NEGATIVE_STOCK",
+                    message: `El item origen (Barcode: ${sourceItem.barcode}) quedará con stock negativo (${sourceItem.currentQuantity - sourceQuantityConsumed}). ¿Desea confirmar que hay exceso en el rollo original?`,
+                  }),
+                );
+              }
+            }
+
+            const transformStrategy =
+              require("../strategies/itemMovementStrategies").ItemMovementStrategyFactory.getStrategy(
+                require("../../../utils/orderTypes").TRANSFORM,
+                strapi.service(require("../../../utils/services").ITEM_SERVICE),
+              );
+
+            const newCutItem = await transformStrategy.create({
+              item: {
+                sourceItemId: sourceItem.id,
+                sourceQuantityConsumed: sourceQuantityConsumed,
+                targetQuantity: targetQty,
+                warehouse: item.warehouse || currentOrder.sourceWarehouse?.id,
+              },
+              order: currentOrder,
+              orderProduct: orderProduct,
+              trx,
+              orderType: require("../../../utils/orderTypes").TRANSFORM,
+              product: product,
+              parentItem: null,
+            });
+
+            const addedItem = await strapi
+              .service(ORDER_SERVICE)
+              .doItemMovement({
+                movementType: ITEM_MOVEMENT_TYPES.CREATE,
+                item: newCutItem,
+                order: currentOrder,
+                orderProduct,
+                product,
+                orderState: currentOrder.state,
+                trx,
+              });
+
+            addedItemsList.push(addedItem);
+          }
+        } else {
+          const addedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
+            movementType: ITEM_MOVEMENT_TYPES.CREATE,
+            item,
+            order: currentOrder,
+            orderProduct,
+            product,
+            orderState: currentOrder.state,
+            trx,
+          });
+          addedItemsList.push(addedItem);
+        }
 
         // Actualizar el OrderProduct
         await orderProductService.update({
@@ -605,16 +775,20 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         });
 
         // Emitir evento WebSocket
-        strapi.io
-          ?.to(`order:${currentOrder.id}`)
-          .emit("order:item-added", { ...addedItem, product });
+        for (const addedItem of addedItemsList) {
+          strapi.io
+            ?.to(`order:${currentOrder.id}`)
+            .emit("order:item-added", { ...addedItem, product });
 
-        logger.debug(`Item added to order`, {
-          orderId: currentOrder.id,
-          itemId: addedItem?.id,
-        });
+          logger.debug(`Item added to order`, {
+            orderId: currentOrder.id,
+            itemId: addedItem?.id,
+          });
+        }
 
-        return { ...addedItem, product: product.id };
+        return addedItemsList.length === 1
+          ? { ...addedItemsList[0], product: product.id }
+          : addedItemsList.map((i) => ({ ...i, product: product.id }));
       } catch (error) {
         logger.error("Error adding item to order", error);
         throw error;
@@ -675,15 +849,46 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         }
 
         // Remover el item
-        const removedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
-          movementType: ITEM_MOVEMENT_TYPES.DELETE,
-          item,
-          order: currentOrder,
-          orderProduct,
-          product: orderProduct.product,
-          orderState: currentOrder.state,
-          trx,
-        });
+        let removedItem;
+        if (orderProduct.product.type === "cutItem") {
+          const transformStrategy =
+            require("../strategies/itemMovementStrategies").ItemMovementStrategyFactory.getStrategy(
+              require("../../../utils/orderTypes").TRANSFORM,
+              strapi.service(require("../../../utils/services").ITEM_SERVICE),
+            );
+
+          await strapi.service(ORDER_SERVICE).doItemMovement({
+            movementType: ITEM_MOVEMENT_TYPES.DELETE,
+            item,
+            order: currentOrder,
+            orderProduct,
+            product: orderProduct.product,
+            orderState: currentOrder.state,
+            trx,
+          });
+
+          await transformStrategy.delete({
+            item,
+            order: currentOrder,
+            orderProduct,
+            trx,
+            orderType: require("../../../utils/orderTypes").TRANSFORM,
+            parentItem: null,
+            movements: null,
+          });
+
+          removedItem = item;
+        } else {
+          removedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
+            movementType: ITEM_MOVEMENT_TYPES.DELETE,
+            item,
+            order: currentOrder,
+            orderProduct,
+            product: orderProduct.product,
+            orderState: currentOrder.state,
+            trx,
+          });
+        }
 
         // Count remaining items across all orderProducts
         let totalItemsLeft = 0;

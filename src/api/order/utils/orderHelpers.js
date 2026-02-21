@@ -162,16 +162,75 @@ const updateOrderProducts = async (
     .map((orderProduct) => orderProduct.items)
     .flat();
 
-  const itemsFromRequest = products
-    .map(({ product, items, ivaIncluded, price }) =>
-      items.map((item) => ({
+  const { ITEM_SERVICE } = require("../../../utils/services");
+  const ITEM_STATES = require("../../../utils/itemStates");
+
+  const itemsFromRequest = [];
+  for (const productReq of products) {
+    const {
+      product: productId,
+      items = [],
+      count,
+      ivaIncluded,
+      price,
+    } = productReq;
+
+    const fetchedProduct = await strapi.entityService.findOne(
+      PRODUCT_SERVICE,
+      productId,
+      { transacting: trx },
+    );
+    if (!fetchedProduct)
+      throw new Error(`El producto con ID ${productId} no existe`);
+
+    let finalItems = items;
+
+    if (fetchedProduct.type === "fixedQuantityPerItem" && count !== undefined) {
+      const currentItemsForProduct =
+        currentOrder.orderProducts.find((op) => op.product.id === productId)
+          ?.items || [];
+      const currentCount = currentItemsForProduct.length;
+
+      if (count === currentCount) {
+        finalItems = currentItemsForProduct;
+      } else if (count > currentCount) {
+        const diff = count - currentCount;
+        const availableItems = await strapi.entityService.findMany(
+          ITEM_SERVICE,
+          {
+            filters: {
+              product: productId,
+              state: ITEM_STATES.AVAILABLE,
+              ...(currentOrder.sourceWarehouse && {
+                warehouse: currentOrder.sourceWarehouse.id,
+              }),
+            },
+            limit: diff,
+            transacting: trx,
+          },
+        );
+
+        if (availableItems.length < diff) {
+          throw new Error(
+            `No hay suficientes items disponibles para ${fetchedProduct.name}. Faltan ${diff}, pero solo hay ${availableItems.length}.`,
+          );
+        }
+
+        finalItems = [...currentItemsForProduct, ...availableItems];
+      } else {
+        finalItems = currentItemsForProduct.slice(0, count);
+      }
+    }
+
+    for (const item of finalItems) {
+      itemsFromRequest.push({
         ...item,
-        product,
+        product: productId,
         ivaIncluded,
         price: parseFloat(price) || 0,
-      })),
-    )
-    .flat();
+      });
+    }
+  }
 
   // Cache de orderProducts por producto para reutilizarlos si se crean en esta ejecución
   const orderProductsByProductId = new Map(

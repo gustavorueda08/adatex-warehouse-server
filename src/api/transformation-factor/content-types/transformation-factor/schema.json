@@ -1,0 +1,40 @@
+{
+  "kind": "collectionType",
+  "collectionName": "transformation_factors",
+  "info": {
+    "singularName": "transformation-factor",
+    "pluralName": "transformation-factors",
+    "displayName": "Transformation Factor",
+    "description": "Rules for converting quantities between products of different units"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "sourceUnit": {
+      "type": "enumeration",
+      "required": true,
+      "enum": ["kg", "m", "unit", "piece"]
+    },
+    "destinationUnit": {
+      "type": "enumeration",
+      "required": true,
+      "enum": ["kg", "m", "unit", "piece"]
+    },
+    "factor": {
+      "type": "decimal",
+      "required": true
+    },
+    "products": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::product.product",
+      "mappedBy": "transformationFactor"
+    }
+  }
+}
