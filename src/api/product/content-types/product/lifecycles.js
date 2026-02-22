@@ -198,6 +198,13 @@ module.exports = {
       }
       // ----------------------------------------------
 
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          `[Product Lifecycle] Omitiendo sincronización con Siigo en ambiente no productivo (${process.env.NODE_ENV}).`,
+        );
+        return;
+      }
+
       const productService = strapi.service("api::siigo.product");
 
       // Si ya tiene siigoId, significa que ya está sincronizado con Siigo
@@ -241,6 +248,14 @@ module.exports = {
   async afterUpdate(event) {
     try {
       const { result } = event;
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          `[Product Lifecycle] Omitiendo sincronización con Siigo en ambiente no productivo (${process.env.NODE_ENV}).`,
+        );
+        return;
+      }
+
       const productService = strapi.service("api::siigo.product");
 
       // Evitar bucle si la actualización viene de syncFromSiigo
@@ -267,6 +282,14 @@ module.exports = {
   async afterDelete(event) {
     try {
       const { result } = event;
+
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          `[Product Lifecycle] Omitiendo sincronización con Siigo en ambiente no productivo (${process.env.NODE_ENV}).`,
+        );
+        return;
+      }
+
       const productService = strapi.service("api::siigo.product");
 
       // Solo sincronizar si el product tenía siigoId
