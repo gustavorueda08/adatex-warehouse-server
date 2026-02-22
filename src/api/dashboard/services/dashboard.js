@@ -66,12 +66,12 @@ module.exports = ({ strapi }) => ({
         quantity = parseFloat(op.deliveredQuantity || 0);
       }
 
-      // Obtener el precio base
+      // Obtener el precio
       let price = parseFloat(op.price || 0);
 
-      // Si tiene IVA incluido, dividir el precio entre 1.19
-      if (op.ivaIncluded === true) {
-        price = price / 1.19;
+      // Si no tiene IVA incluido, lo sumamos para mostrar los totales con IVA
+      if (op.ivaIncluded === false) {
+        price = price * 1.19;
       }
 
       // Calcular subtotal y redondear a 2 decimales
@@ -212,7 +212,7 @@ module.exports = ({ strapi }) => ({
           },
         },
         fields: ["id", "state"],
-      }
+      },
     );
 
     // Compras del mes anterior
@@ -239,7 +239,7 @@ module.exports = ({ strapi }) => ({
           },
         },
         fields: ["id", "state"],
-      }
+      },
     );
 
     // Calcular totales
@@ -350,7 +350,7 @@ module.exports = ({ strapi }) => ({
 
     const change = this.calculatePercentageChange(
       currentPending,
-      previousPending
+      previousPending,
     );
     const trend = currentPending >= previousPending ? "up" : "down";
 
@@ -497,10 +497,10 @@ module.exports = ({ strapi }) => ({
           quantity = parseFloat(op.requestedQuantity || 0);
         }
 
-        // Calcular precio (con o sin IVA)
+        // Calcular precio con IVA
         let price = parseFloat(op.price || 0);
-        if (op.ivaIncluded === true) {
-          price = price / 1.19;
+        if (op.ivaIncluded === false) {
+          price = price * 1.19;
         }
 
         // Calcular revenue y redondear a 2 decimales
