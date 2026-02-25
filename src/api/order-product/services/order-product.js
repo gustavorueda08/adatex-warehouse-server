@@ -151,6 +151,7 @@ module.exports = createCoreService(
             data: {
               ...dataToUpdate,
               ...quantities,
+              requestedPackages: currentOrderProduct.requestedPackages || 0,
             },
             populate: data.populate,
             ...(data.trx ? { transacting: data.trx } : {}),
