@@ -45,42 +45,42 @@ module.exports = createCoreService(
         const product = await strapi.entityService.findOne(
           PRODUCT_SERVICE,
           productId,
-          data.trx ? { transacting: data.trx } : {}
+          data.trx ? { transacting: data.trx } : {},
         );
         // Obtención de la Orden
         const order = await strapi.entityService.findOne(
           ORDER_SERVICE,
           orderId,
-          data.trx ? { transacting: data.trx } : {}
+          data.trx ? { transacting: data.trx } : {},
         );
 
         // Creación y retorno del OrderProduct
-        return await strapi.entityService.create(
-          ORDER_PRODUCT_SERVICE,
-          {
-            data: {
-              ...orderProductData,
-              product: product.id,
-              requestedPackages: orderProductData.confirmedPackages
+        return await strapi.entityService.create(ORDER_PRODUCT_SERVICE, {
+          data: {
+            ...orderProductData,
+            product: product.id,
+            requestedPackages:
+              orderProductData.requestedPackages ??
+              (orderProductData.confirmedPackages
                 ? 0
                 : Math.round(
-                    orderProductData.requestedQuantity / product.unitsPerPackage
-                  ),
-              confirmedPackages: orderProductData.confirmedPackages || 0,
-              confirmedQuantity: orderProductData.confirmedQuantity || 0,
-              requestedQuantity:
-                orderProductData.requestedQuantity ||
-                orderProductData.quantity ||
-                0,
-              order: order.id,
-              unit: product.unit,
-              name: product.name,
-              price: orderProductData.price,
-            },
-            populate: ["product", "items", "movements"],
-            ...(data.trx ? { transacting: data.trx } : {})
-          }
-        );
+                    (orderProductData.requestedQuantity || 0) /
+                      (product.unitsPerPackage || 1),
+                  ) || 0),
+            confirmedPackages: orderProductData.confirmedPackages || 0,
+            confirmedQuantity: orderProductData.confirmedQuantity || 0,
+            requestedQuantity:
+              orderProductData.requestedQuantity ||
+              orderProductData.quantity ||
+              0,
+            order: order.id,
+            unit: product.unit,
+            name: product.name,
+            price: orderProductData.price,
+          },
+          populate: ["product", "items", "movements"],
+          ...(data.trx ? { transacting: data.trx } : {}),
+        });
       } catch (error) {
         throw error;
       }
@@ -97,8 +97,8 @@ module.exports = createCoreService(
           id,
           {
             populate: ["items"],
-            ...(data.trx ? { transacting: data.trx } : {})
-          }
+            ...(data.trx ? { transacting: data.trx } : {}),
+          },
         );
         // Cantidades a modificar
         let quantities = {};
@@ -121,7 +121,7 @@ module.exports = createCoreService(
               confirmedPackages: 0,
               deliveredQuantity: 0,
               deliveredPackages: 0,
-            }
+            },
           );
         } else if (items.length > 0) {
           // Si vienen los Items y no están vacíos, entonces modificamos las cantidades del OrderProduct con estos
@@ -140,7 +140,7 @@ module.exports = createCoreService(
               confirmedPackages: 0,
               deliveredQuantity: 0,
               deliveredPackages: 0,
-            }
+            },
           );
         }
         // Actualizamos y retornamos el OrderProduct
@@ -153,8 +153,8 @@ module.exports = createCoreService(
               ...quantities,
             },
             populate: data.populate,
-            ...(data.trx ? { transacting: data.trx } : {})
-          }
+            ...(data.trx ? { transacting: data.trx } : {}),
+          },
         );
       } catch (error) {
         throw error;
@@ -167,7 +167,7 @@ module.exports = createCoreService(
         await strapi.entityService.delete(
           ORDER_PRODUCT_SERVICE,
           data.id,
-          data.trx ? { transacting: data.trx } : {}
+          data.trx ? { transacting: data.trx } : {},
         );
         // Retornamos respuesta
         return { orderProduct: data.id, state: "Deleted" };
@@ -175,5 +175,5 @@ module.exports = createCoreService(
         throw error;
       }
     }),
-  })
+  }),
 );

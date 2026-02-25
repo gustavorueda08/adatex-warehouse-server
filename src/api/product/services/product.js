@@ -21,6 +21,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       hideFor = [],
       transformationFactors = [],
       productsForCuts = [],
+      parentProduct,
       ...rest
     } = data;
 
@@ -28,6 +29,11 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       const createData = {
         ...rest,
       };
+
+      if (parentProduct) {
+        createData.parentProduct =
+          typeof parentProduct === "object" ? parentProduct.id : parentProduct;
+      }
 
       if (collections.length > 0) {
         createData.collections = { connect: collections };
@@ -116,6 +122,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       hideFor = [],
       transformationFactors = [],
       productsForCuts = [],
+      parentProduct,
       ...rest
     } = data;
 
@@ -160,6 +167,14 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           disconnect: hideForToRemove,
         },
       };
+
+      if (parentProduct !== undefined) {
+        updateData.parentProduct = parentProduct
+          ? typeof parentProduct === "object"
+            ? parentProduct.id
+            : parentProduct
+          : null;
+      }
 
       // Handle on-the-fly TransformationFactors creation/association
       let finalFactorId = null;
@@ -271,6 +286,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     return products.map((product) => {
       const stats = {
         stock: 0,
+        smartCut: 0,
+        printLab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -292,9 +309,11 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           const wType = item.warehouse?.type;
           if (!wType) return;
 
-          if (wType === "stock") {
+          const isStockLike = ["stock", "smartCut", "printLab"].includes(wType);
+
+          if (isStockLike) {
             if (item.state === "available") {
-              stats.stock += qty;
+              stats[wType] += qty;
             } else if (item.state === "reserved") {
               // Only consider an item 'reserved' (meaning deducted from available stock)
               // if it's tied to a 'sale' order. If it's for 'transfer' or 'out',
@@ -304,11 +323,11 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
                 item.order.type === "sale" ||
                 item.order.type === "return"
               ) {
-                stats.stock += qty;
+                stats[wType] += qty;
                 stats.reserved += qty;
               } else {
                 // For transfer or out draft orders, it acts like available stock since it's still there
-                stats.stock += qty;
+                stats[wType] += qty;
               }
             }
           } else if (wType === "production") {
@@ -343,10 +362,10 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           }
 
           // Required: draft sale orders from stock warehouse
-          if (
-            order.type === "sale" &&
-            order.sourceWarehouse?.type === "stock"
-          ) {
+          const isSourceStockLike = ["stock", "smartCut", "printLab"].includes(
+            order.sourceWarehouse?.type,
+          );
+          if (order.type === "sale" && isSourceStockLike) {
             stats.required += requested;
             breakdown.required.push(entry);
           }
@@ -354,9 +373,10 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       }
 
       // ── Derived metrics ──
-      stats.available = Math.max(0, stats.stock - stats.reserved);
+      const totalStockLike = stats.stock + stats.smartCut + stats.printLab;
+      stats.available = Math.max(0, totalStockLike - stats.reserved);
       stats.netAvailable =
-        stats.stock -
+        totalStockLike -
         stats.reserved -
         stats.required +
         stats.production +
@@ -522,6 +542,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     productIds.forEach((pid) => {
       productStats[pid] = {
         stock: 0,
+        smartCut: 0,
+        printLab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -549,19 +571,21 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           ? warehouseMap[itemState.warehouseId].type
           : null;
 
-      if (wType === "stock") {
+      const isStockLike = ["stock", "smartCut", "printLab"].includes(wType);
+
+      if (isStockLike) {
         if (itemState.state === "available") {
-          stats.stock += qty;
+          stats[wType] += qty;
         } else if (itemState.state === "reserved") {
           if (
             !itemState.orderType ||
             itemState.orderType === "sale" ||
             itemState.orderType === "return"
           ) {
-            stats.stock += qty;
+            stats[wType] += qty;
             stats.reserved += qty;
           } else {
-            stats.stock += qty;
+            stats[wType] += qty;
           }
         }
       } else if (wType === "production") {
@@ -642,10 +666,10 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stats.transit += qty;
         bd?.transit.push(entry);
       }
-      if (
-        op.order.type === "sale" &&
-        op.order.sourceWarehouse?.type === "stock"
-      ) {
+      const isSourceStockLike = ["stock", "smartCut", "printLab"].includes(
+        op.order.sourceWarehouse?.type,
+      );
+      if (op.order.type === "sale" && isSourceStockLike) {
         stats.required += qty;
         bd?.required.push(entry);
       }
@@ -655,6 +679,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     return products.map((product) => {
       const stats = productStats[product.id] || {
         stock: 0,
+        smartCut: 0,
+        printLab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -664,9 +690,10 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         netAvailable: 0,
       };
 
-      stats.available = Math.max(0, stats.stock - stats.reserved);
+      const totalStockLike = stats.stock + stats.smartCut + stats.printLab;
+      stats.available = Math.max(0, totalStockLike - stats.reserved);
       stats.netAvailable =
-        stats.stock -
+        totalStockLike -
         stats.reserved -
         stats.required +
         stats.production +
@@ -712,6 +739,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     return products.map((product) => {
       const stats = {
         stock: 0,
+        smartCut: 0,
+        printLab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -739,19 +768,21 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           const estCompleted = sourceOrder?.estimatedCompletedDate;
           const estTransit = sourceOrder?.estimatedTransitDate;
 
-          if (wType === "stock") {
+          const isStockLike = ["stock", "smartCut", "printLab"].includes(wType);
+
+          if (isStockLike) {
             if (item.state === "available") {
-              stats.stock += qty;
+              stats[wType] += qty;
             } else if (item.state === "reserved") {
               if (
                 !item.order ||
                 item.order.type === "sale" ||
                 item.order.type === "return"
               ) {
-                stats.stock += qty;
+                stats[wType] += qty;
                 stats.reserved += qty;
               } else {
-                stats.stock += qty;
+                stats[wType] += qty;
               }
             }
           } else if (wType === "production") {
@@ -809,9 +840,12 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           }
 
           // ── Sale orders: required ──
+          const isSourceStockLike = ["stock", "smartCut", "printLab"].includes(
+            order.sourceWarehouse?.type,
+          );
           if (
             order.type === "sale" &&
-            order.sourceWarehouse?.type === "stock" &&
+            isSourceStockLike &&
             isWithinRange(estCompleted)
           ) {
             stats.required += requested;
@@ -821,12 +855,13 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       }
 
       // ── Derived metrics ──
+      const totalStockLike = stats.stock + stats.smartCut + stats.printLab;
       stats.available = Math.max(
         0,
-        stats.stock - stats.reserved + stats.arriving,
+        totalStockLike - stats.reserved + stats.arriving,
       );
       stats.netAvailable =
-        stats.stock +
+        totalStockLike +
         stats.arriving -
         stats.reserved -
         stats.required +
@@ -1121,10 +1156,19 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           hideFor,
           transformationFactors,
           productsForCuts,
+          parentProduct,
           ...restData
         } = productInput;
         // Keep a mutable data object for injection
         let data = { ...restData };
+
+        if (parentProduct !== undefined) {
+          data.parentProduct = parentProduct
+            ? typeof parentProduct === "object"
+              ? parentProduct.id
+              : parentProduct
+            : null;
+        }
 
         // ── Resolve collections by name ──
         if (Array.isArray(collections)) {

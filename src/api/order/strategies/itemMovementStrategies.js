@@ -582,58 +582,72 @@ class TransformStrategy extends ItemMovementStrategy {
       INVENTORY_MOVEMENT_SERVICE,
     } = require("../../../utils/services");
 
-    // Obtener el item origen (sourceItem) usando query builder para asegurar lectura transaccional directa
-    let sourceItem;
-    if (item.sourceItemId) {
-      sourceItem = await strapi.db.query(ITEM_SERVICE).findOne({
-        where: { id: item.sourceItemId },
+    const sourceItemsConsumedMap = item.sourceItemsConsumed || [];
+
+    // Fallback in case old logic sends a single sourceItemId
+    if (sourceItemsConsumedMap.length === 0 && item.sourceItemId) {
+      sourceItemsConsumedMap.push({
+        id: item.sourceItemId,
+        quantity: item.sourceQuantityConsumed || item.quantity,
+      });
+    }
+
+    if (sourceItemsConsumedMap.length === 0) {
+      throw new Error(
+        "Se requieren sourceItemsConsumed o sourceItemId para transformaciones",
+      );
+    }
+
+    const totalSourceQuantityConsumed =
+      item.sourceQuantityConsumed || item.quantity;
+    const targetQuantity = item.targetQuantity || item.quantity;
+
+    // Check and deduct from all source items securely
+    const processedSourceData = [];
+
+    for (const sourceConsumption of sourceItemsConsumedMap) {
+      const sourceItem = await strapi.db.query(ITEM_SERVICE).findOne({
+        where: { id: sourceConsumption.id },
         populate: ["product", "warehouse"],
-        // transacting: trx // strapi.db.query no usa 'transacting' en options igual que entityService, depende de la versión
-        // En v4, db.query usa el contexto global si no se pasa, pero para trx explícita se pasa en el método de strapi.db
-        // SIN EMBARGO, si 'trx' es una transacción de Knex, strapi.db.query NO la acepta directamente en options en todas las versiones.
-        // Pero EntityService sí. El problema es el cacheo de EntityService.
-        // Vamos a usar strapi.db.query que suele ser más directo.
-        // NOTA: Para soportar trx explicitamente con query builder en v4, se suele usar transacting: trx en las opciones.
         ...(trx ? { transacting: trx } : {}),
       });
 
       if (!sourceItem) {
         throw new Error(
-          `Item origen con id ${item.sourceItemId} no encontrado`,
+          `Item origen con id ${sourceConsumption.id} no encontrado`,
         );
       }
-    } else {
-      throw new Error("Se requiere sourceItemId para transformaciones");
-    }
 
-    const sourceQuantityConsumed = item.sourceQuantityConsumed || item.quantity;
-    const targetQuantity = item.targetQuantity || item.quantity;
+      if (sourceItem.currentQuantity < sourceConsumption.quantity) {
+        throw new Error(
+          `Item origen ${sourceItem.barcode} solo tiene ${sourceItem.currentQuantity} ${sourceItem.unit}, se requieren ${sourceConsumption.quantity}`,
+        );
+      }
 
-    // Validar que hay suficiente cantidad en el item origen
-    // Al usar db.query, esperamos ver el dato actualizado por la iteración anterior
-    if (sourceItem.currentQuantity < sourceQuantityConsumed) {
-      throw new Error(
-        `Item origen solo tiene ${sourceItem.currentQuantity} ${sourceItem.unit}, se requieren ${sourceQuantityConsumed}`,
+      const newSourceQuantity = Math.max(
+        sourceItem.currentQuantity - sourceConsumption.quantity,
+        0,
       );
+
+      // Usar db.query update para asegurar escritura directa
+      await strapi.db.query(ITEM_SERVICE).update({
+        where: { id: sourceItem.id },
+        data: {
+          currentQuantity: newSourceQuantity,
+        },
+        ...(trx ? { transacting: trx } : {}),
+      });
+
+      processedSourceData.push({
+        sourceItem,
+        consumedQuantity: sourceConsumption.quantity,
+        newSourceQuantity,
+      });
     }
 
-    // Detectar si es una partición (mismo producto) o transformación (producto diferente)
-    const isCut = sourceItem.product.id === product.id;
-
-    // 1. Reducir la cantidad del item origen
-    const newSourceQuantity = Math.max(
-      sourceItem.currentQuantity - sourceQuantityConsumed,
-      0,
-    );
-
-    // Usar db.query update para asegurar escritura directa
-    await strapi.db.query(ITEM_SERVICE).update({
-      where: { id: sourceItem.id },
-      data: {
-        currentQuantity: newSourceQuantity,
-      },
-      ...(trx ? { transacting: trx } : {}),
-    });
+    // The main sourceItem drives defaults like warehouse/lotNumber
+    const primarySourceItem = processedSourceData[0].sourceItem;
+    const isCut = primarySourceItem.product.id === product.id;
 
     // 2. Crear el nuevo item (transformado o particionado)
     const newItemData = {
@@ -641,37 +655,35 @@ class TransformStrategy extends ItemMovementStrategy {
       originalQuantity: targetQuantity,
       currentQuantity: targetQuantity,
       unit: product.unit,
-      sourceQuantityConsumed,
+      sourceQuantityConsumed: totalSourceQuantityConsumed,
+      sourceItemsConsumed: sourceItemsConsumedMap, // Keep history of all consumed parent amounts
       warehouse:
         item.warehouse ||
-        sourceItem.warehouse?.id ||
+        primarySourceItem.warehouse?.id ||
         order.destinationWarehouse?.id,
       sourceOrder: order.id,
-      // IMPORTANTE: Conectar también la relación many-to-many 'orders'
       orders: { connect: [order.id] },
       orderProducts: { connect: [orderProduct.id] },
       product: product.id,
-      lotNumber: item.lotNumber || sourceItem.lotNumber,
+      lotNumber: item.lotNumber || primarySourceItem.lotNumber,
       itemNumber: item.itemNumber,
       state: ITEM_STATES.AVAILABLE,
-      // Generar barcode
+      // Generar barcode basado en el primer lote encontrado si aplica
       barcode: require("../../../utils/generateCodes").generateItemBarcode(
         product,
         targetQuantity,
-        item.lotNumber || sourceItem.lotNumber,
+        item.lotNumber || primarySourceItem.lotNumber,
         item.itemNumber,
         order.containerCode,
       ),
     };
 
-    // Establecer la relación correcta según el tipo de operación
+    // Establecer relaciones legacy con el primaryItem por compatibilidad o búsquedas simples
     if (isCut) {
-      // Es un corte/partición: mismo producto
-      newItemData.parentItem = sourceItem.id;
+      newItemData.parentItem = primarySourceItem.id;
       newItemData.isPartition = true;
     } else {
-      // Es una transformación: producto diferente
-      newItemData.transformedFromItem = sourceItem.id;
+      newItemData.transformedFromItem = primarySourceItem.id;
     }
 
     const newItem = await strapi.entityService.create(
@@ -684,28 +696,30 @@ class TransformStrategy extends ItemMovementStrategy {
 
     // 3. Crear ItemMovements para trazabilidad
 
-    // Movement OUT/TRANSFORM del item origen (consumo)
-    await strapi.entityService.create(
-      INVENTORY_MOVEMENT_SERVICE,
-      {
-        data: {
-          item: sourceItem.id,
-          quantity: -sourceQuantityConsumed,
-          order: order.id,
-          orderProduct: orderProduct.id,
-          type: TRANSFORM,
-          reason: isCut
-            ? `Partición de ${sourceQuantityConsumed} ${sourceItem.unit} del item ${sourceItem.barcode}`
-            : `Transformación de ${sourceQuantityConsumed} ${sourceItem.unit} de ${sourceItem.product.name} a ${product.name}`,
-          balanceBefore: sourceItem.currentQuantity,
-          balanceAfter: newSourceQuantity,
-          sourceWarehouse: sourceItem.warehouse?.id,
+    // Crear un Movement OUT/TRANSFORM para cada item origen afectado
+    for (const processedData of processedSourceData) {
+      await strapi.entityService.create(
+        INVENTORY_MOVEMENT_SERVICE,
+        {
+          data: {
+            item: processedData.sourceItem.id,
+            quantity: -processedData.consumedQuantity,
+            order: order.id,
+            orderProduct: orderProduct.id,
+            type: TRANSFORM,
+            reason: isCut
+              ? `Partición de ${processedData.consumedQuantity} ${processedData.sourceItem.unit} del item ${processedData.sourceItem.barcode}`
+              : `Transformación de ${processedData.consumedQuantity} ${processedData.sourceItem.unit} de ${processedData.sourceItem.product.name} a ${product.name}`,
+            balanceBefore: processedData.sourceItem.currentQuantity,
+            balanceAfter: processedData.newSourceQuantity,
+            sourceWarehouse: processedData.sourceItem.warehouse?.id,
+          },
         },
-      },
-      { transacting: trx },
-    );
+        { transacting: trx },
+      );
+    }
 
-    // Movement IN/TRANSFORM del nuevo item (creación)
+    // Movement IN/TRANSFORM del nuevo item fusionado
     await strapi.entityService.create(
       INVENTORY_MOVEMENT_SERVICE,
       {
@@ -716,8 +730,8 @@ class TransformStrategy extends ItemMovementStrategy {
           orderProduct: orderProduct.id,
           type: TRANSFORM,
           reason: isCut
-            ? `Creación de item particionado con ${targetQuantity} ${product.unit}`
-            : `Creación de item transformado: ${targetQuantity} ${product.unit} de ${product.name}`,
+            ? `Creación de item particionado consolidado con ${targetQuantity} ${product.unit}`
+            : `Creación de item transformado consolidado: ${targetQuantity} ${product.unit} de ${product.name}`,
           destinationWarehouse: newItemData.warehouse,
           balanceBefore: 0,
           balanceAfter: targetQuantity,
@@ -911,68 +925,113 @@ class TransformStrategy extends ItemMovementStrategy {
       throw new Error(`Item con id ${item.id} no encontrado`);
     }
 
-    // Determinar el item origen (puede ser parentItem o transformedFromItem)
-    // Obtenemos el ID del source item
-    const sourceItemId =
-      fullItem.parentItem?.id || fullItem.transformedFromItem?.id;
-
-    if (!sourceItemId) {
-      throw new Error(
-        "No se encontró el item origen para revertir la transformación",
-      );
-    }
-
-    // Obtener el sourceItem fresco de la BD (crucial si hay múltiples reversiones en la misma transacción)
-    const sourceItem = await strapi.db.query(ITEM_SERVICE).findOne({
-      where: { id: sourceItemId },
-      populate: ["product", "warehouse"],
-      ...(trx ? { transacting: trx } : {}),
-    });
-
-    if (!sourceItem) {
-      throw new Error(
-        `Item origen con id ${sourceItemId} no encontrado durante reversión`,
-      );
-    }
-
+    // Prefer new array-based source tracking, fallback to legacy relationships
+    const sourceItemsConsumedMap = fullItem.sourceItemsConsumed || [];
     const isCut = !!fullItem.parentItem;
-    const quantityToRestore =
-      fullItem.currentQuantity || fullItem.originalQuantity;
 
-    // 1. Restaurar la cantidad al item origen
-    const restoredQuantity =
-      parseFloat(sourceItem.currentQuantity) + parseFloat(quantityToRestore);
+    // Check if we need to use legacy fallback math logic
+    if (sourceItemsConsumedMap.length === 0) {
+      const sourceItemId =
+        fullItem.parentItem?.id || fullItem.transformedFromItem?.id;
 
-    // Actualizar sourceItem directamente
-    await strapi.db.query(ITEM_SERVICE).update({
-      where: { id: sourceItem.id },
-      data: {
-        currentQuantity: restoredQuantity,
-      },
-      ...(trx ? { transacting: trx } : {}),
-    });
+      if (!sourceItemId) {
+        throw new Error(
+          "No se encontró el item origen para revertir la transformación",
+        );
+      }
 
-    // 2. Crear movement de reversión para el item origen
-    await strapi.entityService.create(
-      INVENTORY_MOVEMENT_SERVICE,
-      {
+      let quantityToRestore = fullItem.sourceQuantityConsumed;
+
+      if (!quantityToRestore) {
+        quantityToRestore =
+          fullItem.currentQuantity || fullItem.originalQuantity;
+
+        let factor = 1;
+        let multiplySource = false;
+        if (fullItem.product?.transformationFactor) {
+          factor =
+            parseFloat(fullItem.product.transformationFactor.factor) || 1;
+          if (
+            fullItem.product.transformationFactor.sourceUnit ===
+              fullItem.product?.unit &&
+            fullItem.product.transformationFactor.destinationUnit ===
+              fullItem.parentItem?.product?.unit
+          ) {
+            multiplySource = true;
+          } else {
+            multiplySource = false;
+          }
+        }
+
+        if (factor !== 1) {
+          quantityToRestore = multiplySource
+            ? quantityToRestore * factor
+            : quantityToRestore / factor;
+        }
+      } else {
+        if (
+          fullItem.originalQuantity &&
+          fullItem.currentQuantity !== fullItem.originalQuantity
+        ) {
+          const ratio = fullItem.currentQuantity / fullItem.originalQuantity;
+          quantityToRestore = quantityToRestore * ratio;
+        }
+      }
+
+      sourceItemsConsumedMap.push({
+        id: sourceItemId,
+        quantity: quantityToRestore,
+      });
+    }
+
+    // 1 & 2. Restaurar cantidades y crear movimientos
+    for (const sourceConsumption of sourceItemsConsumedMap) {
+      const sourceItem = await strapi.db.query(ITEM_SERVICE).findOne({
+        where: { id: sourceConsumption.id },
+        populate: ["warehouse", "product"],
+        ...(trx ? { transacting: trx } : {}),
+      });
+
+      if (!sourceItem) {
+        throw new Error(
+          `Item origen con id ${sourceConsumption.id} no encontrado durante reversión`,
+        );
+      }
+
+      const restoredQuantity =
+        parseFloat(sourceItem.currentQuantity) +
+        parseFloat(sourceConsumption.quantity);
+
+      // Actualizar sourceItem
+      await strapi.db.query(ITEM_SERVICE).update({
+        where: { id: sourceItem.id },
         data: {
-          item: sourceItem.id,
-          quantity: quantityToRestore,
-          order: order.id,
-          orderProduct: orderProduct.id,
-          type: TRANSFORM,
-          reason: isCut
-            ? `Reversión de partición: restaurando ${quantityToRestore} ${sourceItem.unit}`
-            : `Reversión de transformación: restaurando ${quantityToRestore} ${sourceItem.unit}`,
-          balanceBefore: sourceItem.currentQuantity,
-          balanceAfter: restoredQuantity,
-          // Asegurar que el movement tenga el warehouse correcto
-          destinationWarehouse: sourceItem.warehouse?.id,
+          currentQuantity: restoredQuantity,
         },
-      },
-      { transacting: trx },
-    );
+        ...(trx ? { transacting: trx } : {}),
+      });
+
+      // Movement reversión
+      await strapi.entityService.create(
+        INVENTORY_MOVEMENT_SERVICE,
+        {
+          data: {
+            item: sourceItem.id,
+            quantity: sourceConsumption.quantity,
+            order: order?.id,
+            orderProduct: orderProduct?.id,
+            type: TRANSFORM,
+            reason: isCut
+              ? `Reversión de partición consolidada: restaurando ${sourceConsumption.quantity} ${sourceItem.unit}`
+              : `Reversión de transformación consolidada: restaurando ${sourceConsumption.quantity} ${sourceItem.unit}`,
+            balanceBefore: sourceItem.currentQuantity,
+            balanceAfter: restoredQuantity,
+            destinationWarehouse: sourceItem.warehouse?.id,
+          },
+        },
+        { transacting: trx },
+      );
+    }
 
     // 3. Crear movement de reversión para el item transformado (antes de eliminarlo)
     await strapi.entityService.create(
@@ -980,12 +1039,12 @@ class TransformStrategy extends ItemMovementStrategy {
       {
         data: {
           item: fullItem.id,
-          quantity: -quantityToRestore,
-          order: order.id,
-          orderProduct: orderProduct.id,
+          quantity: -fullItem.currentQuantity,
+          order: order?.id,
+          orderProduct: orderProduct?.id,
           type: TRANSFORM,
-          reason: `Reversión: eliminación de item ${isCut ? "particionado" : "transformado"}`,
-          balanceBefore: quantityToRestore,
+          reason: `Reversión: eliminación de item consolidado ${isCut ? "particionado" : "transformado"}`,
+          balanceBefore: fullItem.currentQuantity,
           balanceAfter: 0,
         },
       },
@@ -993,13 +1052,12 @@ class TransformStrategy extends ItemMovementStrategy {
     );
 
     // 4. Eliminar el item transformado/particionado DIRECTAMENTE
-    // Usamos delete directo para evitar que el servicio de Item cree un movimiento de ajuste redundante
     await strapi.db.query(ITEM_SERVICE).delete({
       where: { id: fullItem.id },
       ...(trx ? { transacting: trx } : {}),
     });
 
-    return sourceItem;
+    return true;
   }
 }
 

@@ -53,6 +53,8 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       if (!data?.data) {
         throw new Error("Los datos de la orden son requeridos");
       }
+      console.log(JSON.stringify(data.data));
+
       const { products = [], ...rest } = data.data;
       const order = await orderService.update({
         products,

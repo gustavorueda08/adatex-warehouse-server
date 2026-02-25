@@ -711,6 +711,7 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.DefaultTo<'approved'>;
     receiptDate: Schema.Attribute.DateTime;
+    sourceItemsConsumed: Schema.Attribute.JSON;
     sourceOrder: Schema.Attribute.Relation<'manyToOne', 'api::order.order'>;
     sourceQuantityConsumed: Schema.Attribute.Decimal &
       Schema.Attribute.DefaultTo<0>;

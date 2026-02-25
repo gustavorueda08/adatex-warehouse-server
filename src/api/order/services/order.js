@@ -374,6 +374,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           {
             populate: [
               "orderProducts",
+              "orderProducts.product",
               "orderProducts.items",
               "sourceWarehouse",
             ],
@@ -401,6 +402,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                 item,
                 order: currentOrder,
                 orderProduct,
+                product: orderProduct.product,
                 trx,
               }),
             1,
@@ -487,15 +489,31 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           break;
 
         case ITEM_MOVEMENT_TYPES.DELETE:
-          result = await strategy.delete({
-            item,
-            order,
-            orderProduct,
-            orderType,
-            parentItem,
-            movements,
-            trx,
-          });
+          if (product?.type === "cutItem") {
+            const transformStrategy = ItemMovementStrategyFactory.getStrategy(
+              require("../../../utils/orderTypes").TRANSFORM,
+              itemService,
+            );
+            result = await transformStrategy.delete({
+              item,
+              order,
+              orderProduct,
+              orderType: require("../../../utils/orderTypes").TRANSFORM,
+              parentItem,
+              movements,
+              trx,
+            });
+          } else {
+            result = await strategy.delete({
+              item,
+              order,
+              orderProduct,
+              orderType,
+              parentItem,
+              movements,
+              trx,
+            });
+          }
           break;
 
         default:
@@ -649,18 +667,21 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           let multiplySource = false;
           if (product.transformationFactor) {
             factor = parseFloat(product.transformationFactor.factor) || 1;
+            // If the transformation rule is defined as: Child Unit -> Parent Unit
+            // Example: 1 meter (cut) = 0.5 kg (parent). Factor = 0.5
+            // Target is 10 meters. Consumed = 10 * 0.5 = 5kg.
             if (
-              product.transformationFactor.sourceUnit ===
-                product.parentProduct.unit &&
-              product.transformationFactor.destinationUnit === product.unit
-            ) {
-              multiplySource = false;
-            } else if (
               product.transformationFactor.sourceUnit === product.unit &&
               product.transformationFactor.destinationUnit ===
                 product.parentProduct.unit
             ) {
               multiplySource = true;
+            }
+            // Otherwise, assume rule is Parent Unit -> Child Unit
+            // Example: 1 kg (parent) = 2 meters (cut). Factor = 2
+            // Target is 10 meters. Consumed = 10 / 2 = 5kg.
+            else {
+              multiplySource = false;
             }
           }
 
@@ -685,6 +706,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                 : sourceQuantityConsumed / factor;
             }
 
+            // Fetch enough available parent items to potentially fulfill the request
             const availableParentItems = await strapi.entityService.findMany(
               require("../../../utils/services").ITEM_SERVICE,
               {
@@ -694,7 +716,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                   warehouse: { $in: smartCutWhIds },
                 },
                 sort: { currentQuantity: "desc" },
-                limit: 1,
+                limit: 50, // Fetch up to 50 parent rolls to ensure we have enough
                 populate: ["warehouse", "product"],
                 transacting: trx,
               },
@@ -706,19 +728,60 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               );
             }
 
-            const sourceItem = availableParentItems[0];
+            let remainingSourceQty = sourceQuantityConsumed;
+            let parentItemIndex = 0;
+            const sourceItemsConsumedMap = [];
 
-            if (sourceItem.currentQuantity < sourceQuantityConsumed) {
-              if (!item.confirmNegativeStock) {
-                throw new Error(
-                  JSON.stringify({
-                    code: "NEGATIVE_STOCK",
-                    message: `El item origen (Barcode: ${sourceItem.barcode}) quedará con stock negativo (${sourceItem.currentQuantity - sourceQuantityConsumed}). ¿Desea confirmar que hay exceso en el rollo original?`,
-                  }),
-                );
+            while (remainingSourceQty > 0) {
+              const sourceItem = availableParentItems[parentItemIndex];
+
+              if (!sourceItem) {
+                // We ran out of available items. Apply negative stock to the last known item if confirmed
+                const lastSourceItem =
+                  availableParentItems[availableParentItems.length - 1];
+                if (!item.confirmNegativeStock) {
+                  throw new Error(
+                    JSON.stringify({
+                      code: "NEGATIVE_STOCK",
+                      message: `No hay suficiente stock en los rollos disponibles. Faltan ${remainingSourceQty} ${lastSourceItem.unit}. ¿Desea forzar el corte negativo en el último rollo disponible?`,
+                    }),
+                  );
+                }
+
+                // If confirmed, just dump the rest of the negative debt onto the last item
+                sourceItemsConsumedMap.push({
+                  id: lastSourceItem.id,
+                  quantity: remainingSourceQty,
+                });
+
+                // Force break the loop as we handled the remainder
+                remainingSourceQty = 0;
+                break;
               }
+
+              const consumedFromThisItem = Math.min(
+                sourceItem.currentQuantity,
+                remainingSourceQty,
+              );
+
+              // If this item is empty (e.g., 0 quantity), skip it
+              if (consumedFromThisItem <= 0) {
+                parentItemIndex++;
+                continue;
+              }
+
+              sourceItemsConsumedMap.push({
+                id: sourceItem.id,
+                quantity: consumedFromThisItem,
+              });
+
+              remainingSourceQty -= consumedFromThisItem;
+
+              // Proceed to next parent item if we still need more
+              parentItemIndex++;
             }
 
+            // Create ONE cutItem for the entire requested targetQty, mapping the multiple consumed sources
             const transformStrategy =
               require("../strategies/itemMovementStrategies").ItemMovementStrategyFactory.getStrategy(
                 require("../../../utils/orderTypes").TRANSFORM,
@@ -727,7 +790,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
             const newCutItem = await transformStrategy.create({
               item: {
-                sourceItemId: sourceItem.id,
+                sourceItemsConsumed: sourceItemsConsumedMap,
                 sourceQuantityConsumed: sourceQuantityConsumed,
                 targetQuantity: targetQty,
                 warehouse: item.warehouse || currentOrder.sourceWarehouse?.id,
@@ -849,46 +912,15 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         }
 
         // Remover el item
-        let removedItem;
-        if (orderProduct.product.type === "cutItem") {
-          const transformStrategy =
-            require("../strategies/itemMovementStrategies").ItemMovementStrategyFactory.getStrategy(
-              require("../../../utils/orderTypes").TRANSFORM,
-              strapi.service(require("../../../utils/services").ITEM_SERVICE),
-            );
-
-          await strapi.service(ORDER_SERVICE).doItemMovement({
-            movementType: ITEM_MOVEMENT_TYPES.DELETE,
-            item,
-            order: currentOrder,
-            orderProduct,
-            product: orderProduct.product,
-            orderState: currentOrder.state,
-            trx,
-          });
-
-          await transformStrategy.delete({
-            item,
-            order: currentOrder,
-            orderProduct,
-            trx,
-            orderType: require("../../../utils/orderTypes").TRANSFORM,
-            parentItem: null,
-            movements: null,
-          });
-
-          removedItem = item;
-        } else {
-          removedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
-            movementType: ITEM_MOVEMENT_TYPES.DELETE,
-            item,
-            order: currentOrder,
-            orderProduct,
-            product: orderProduct.product,
-            orderState: currentOrder.state,
-            trx,
-          });
-        }
+        const removedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
+          movementType: ITEM_MOVEMENT_TYPES.DELETE,
+          item,
+          order: currentOrder,
+          orderProduct,
+          product: orderProduct.product,
+          orderState: currentOrder.state,
+          trx,
+        });
 
         // Count remaining items across all orderProducts
         let totalItemsLeft = 0;

@@ -32,22 +32,12 @@
     "unit": {
       "type": "enumeration",
       "required": true,
-      "enum": [
-        "kg",
-        "m",
-        "piece",
-        "unit"
-      ]
+      "enum": ["kg", "m", "piece", "unit"]
     },
     "state": {
       "type": "enumeration",
       "default": "available",
-      "enum": [
-        "available",
-        "reserved",
-        "sold",
-        "dropped"
-      ]
+      "enum": ["available", "reserved", "sold", "dropped"]
     },
     "lotNumber": {
       "type": "string"
@@ -68,12 +58,7 @@
     "qualityStatus": {
       "type": "enumeration",
       "default": "approved",
-      "enum": [
-        "pending",
-        "approved",
-        "rejected",
-        "conditional"
-      ]
+      "enum": ["pending", "approved", "rejected", "conditional"]
     },
     "qualityNotes": {
       "type": "text"
@@ -177,6 +162,9 @@
     "sourceQuantityConsumed": {
       "type": "decimal",
       "default": 0
+    },
+    "sourceItemsConsumed": {
+      "type": "json"
     }
   }
 }
