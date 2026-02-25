@@ -618,10 +618,62 @@ class TransformStrategy extends ItemMovementStrategy {
         );
       }
 
+      console.log(
+        "DEBUG: item in TransformStrategy.create",
+        JSON.stringify(item),
+      );
+      console.log(
+        "DEBUG: sourceConsumption",
+        JSON.stringify(sourceConsumption),
+      );
+
+      const ADJUSTMENT =
+        require("../../../utils/inventoryMovementTypes").ADJUSTMENT;
+
+      let missingQuantity = 0;
       if (sourceItem.currentQuantity < sourceConsumption.quantity) {
-        throw new Error(
-          `Item origen ${sourceItem.barcode} solo tiene ${sourceItem.currentQuantity} ${sourceItem.unit}, se requieren ${sourceConsumption.quantity}`,
+        if (!item.confirmNegativeStock && !item.forceNegativeStock) {
+          throw new Error(
+            `Item origen ${sourceItem.barcode} solo tiene ${sourceItem.currentQuantity} ${sourceItem.unit}, se requieren ${sourceConsumption.quantity}`,
+          );
+        } else {
+          missingQuantity =
+            sourceConsumption.quantity - sourceItem.currentQuantity;
+        }
+      }
+
+      if (missingQuantity > 0) {
+        const adjustedQuantity = sourceItem.currentQuantity + missingQuantity;
+
+        // Make the adjustment
+        await strapi.db.query(ITEM_SERVICE).update({
+          where: { id: sourceItem.id },
+          data: {
+            currentQuantity: adjustedQuantity,
+          },
+          ...(trx ? { transacting: trx } : {}),
+        });
+
+        await strapi.entityService.create(
+          INVENTORY_MOVEMENT_SERVICE,
+          {
+            data: {
+              item: sourceItem.id,
+              quantity: missingQuantity,
+              order: order?.id,
+              orderProduct: orderProduct?.id,
+              type: ADJUSTMENT,
+              reason: `Ajuste por corte de stock negativo: se encontraron ${missingQuantity} ${sourceItem.unit} adicionales físicamente.`,
+              balanceBefore: sourceItem.currentQuantity,
+              balanceAfter: adjustedQuantity,
+              destinationWarehouse: sourceItem.warehouse?.id,
+            },
+          },
+          { transacting: trx },
         );
+
+        // Update the source item object for the next steps
+        sourceItem.currentQuantity = adjustedQuantity;
       }
 
       const newSourceQuantity = Math.max(
@@ -629,7 +681,7 @@ class TransformStrategy extends ItemMovementStrategy {
         0,
       );
 
-      // Usar db.query update para asegurar escritura directa
+      // Usar db.query update para asegurar escritura directa (ahora consume la cantidad ajustada)
       await strapi.db.query(ITEM_SERVICE).update({
         where: { id: sourceItem.id },
         data: {
@@ -1011,7 +1063,7 @@ class TransformStrategy extends ItemMovementStrategy {
         ...(trx ? { transacting: trx } : {}),
       });
 
-      // Movement reversión
+      // Movement reversión del consumo
       await strapi.entityService.create(
         INVENTORY_MOVEMENT_SERVICE,
         {
@@ -1031,6 +1083,56 @@ class TransformStrategy extends ItemMovementStrategy {
         },
         { transacting: trx },
       );
+
+      // Check for any ADJUSTMENT movement created during the forced negative stock
+      const { ADJUSTMENT } = require("../../../utils/inventoryMovementTypes");
+      const adjustmentMovements = await strapi.entityService.findMany(
+        INVENTORY_MOVEMENT_SERVICE,
+        {
+          filters: {
+            item: sourceItem.id,
+            order: order?.id,
+            orderProduct: orderProduct?.id,
+            type: ADJUSTMENT,
+          },
+          ...(trx ? { transacting: trx } : {}),
+        },
+      );
+
+      // Revertir the adjustment if one was found
+      let currentItemQuantity = restoredQuantity;
+      for (const adjMovement of adjustmentMovements) {
+        if (adjMovement.quantity > 0) {
+          const revertQuantity = -adjMovement.quantity;
+          currentItemQuantity = currentItemQuantity + revertQuantity;
+
+          await strapi.db.query(ITEM_SERVICE).update({
+            where: { id: sourceItem.id },
+            data: {
+              currentQuantity: currentItemQuantity,
+            },
+            ...(trx ? { transacting: trx } : {}),
+          });
+
+          await strapi.entityService.create(
+            INVENTORY_MOVEMENT_SERVICE,
+            {
+              data: {
+                item: sourceItem.id,
+                quantity: revertQuantity,
+                order: order?.id,
+                orderProduct: orderProduct?.id,
+                type: ADJUSTMENT,
+                reason: `Reversión de ajuste por stock negativo: removiendo ${adjMovement.quantity} ${sourceItem.unit}`,
+                balanceBefore: currentItemQuantity - revertQuantity,
+                balanceAfter: currentItemQuantity,
+                destinationWarehouse: sourceItem.warehouse?.id,
+              },
+            },
+            { transacting: trx },
+          );
+        }
+      }
     }
 
     // 3. Crear movement de reversión para el item transformado (antes de eliminarlo)

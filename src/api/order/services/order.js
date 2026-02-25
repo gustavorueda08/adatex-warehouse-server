@@ -739,7 +739,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                 // We ran out of available items. Apply negative stock to the last known item if confirmed
                 const lastSourceItem =
                   availableParentItems[availableParentItems.length - 1];
-                if (!item.confirmNegativeStock) {
+                if (!item.confirmNegativeStock && !item.forceNegativeStock) {
                   throw new Error(
                     JSON.stringify({
                       code: "NEGATIVE_STOCK",
@@ -794,6 +794,8 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                 sourceQuantityConsumed: sourceQuantityConsumed,
                 targetQuantity: targetQty,
                 warehouse: item.warehouse || currentOrder.sourceWarehouse?.id,
+                confirmNegativeStock: item.confirmNegativeStock,
+                forceNegativeStock: item.forceNegativeStock,
               },
               order: currentOrder,
               orderProduct: orderProduct,
