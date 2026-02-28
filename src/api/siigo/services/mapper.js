@@ -25,19 +25,19 @@ module.exports = ({ strapi }) => ({
 
       if (order.type !== "sale") {
         throw new Error(
-          "Solo las órdenes de tipo 'sale' pueden convertirse en facturas"
+          "Solo las órdenes de tipo 'sale' pueden convertirse en facturas",
         );
       }
 
       if (order.state !== "completed") {
         throw new Error(
-          "Solo las órdenes en estado 'completed' pueden facturarse"
+          "Solo las órdenes en estado 'completed' pueden facturarse",
         );
       }
 
       if (!order.customerForInvoice) {
         throw new Error(
-          "La orden debe tener un customerForInvoice para facturar"
+          "La orden debe tener un customerForInvoice para facturar",
         );
       }
 
@@ -47,25 +47,25 @@ module.exports = ({ strapi }) => ({
       // Validar que el cliente tenga siigoId
       if (!customer.siigoId) {
         throw new Error(
-          `El cliente ${customer.name} (ID: ${customer.id}) no tiene siigoId. Debe sincronizarse con Siigo primero.`
+          `El cliente ${customer.name} (ID: ${customer.id}) no tiene siigoId. Debe sincronizarse con Siigo primero.`,
         );
       }
 
       if (!customer.identification) {
         throw new Error(
-          `El cliente ${customer.name} no tiene número de identificación`
+          `El cliente ${customer.name} no tiene número de identificación`,
         );
       }
 
       if (!seller) {
         throw new Error(
-          `El cliente ${customer.name} no tiene un vendedor asignado`
+          `El cliente ${customer.name} no tiene un vendedor asignado`,
         );
       }
 
       if (!seller.siigoCode) {
         throw new Error(
-          `El vendedor ${seller.name} no tiene número de identificación en siigo`
+          `El vendedor ${seller.name} no tiene número de identificación en siigo`,
         );
       }
 
@@ -77,7 +77,7 @@ module.exports = ({ strapi }) => ({
       // Mapear items de la factura
       const items = await this.mapOrderProductsToItems(
         order.orderProducts,
-        customer
+        customer,
       );
 
       // Calcular totales de la factura
@@ -171,7 +171,7 @@ module.exports = ({ strapi }) => ({
             // Calcular impuestos adicionales
             for (const itemTax of item.taxes) {
               const taxDef = customer.taxes.find(
-                (t) => parseInt(t.siigoCode) === itemTax.id
+                (t) => parseInt(t.siigoCode) === itemTax.id,
               );
               if (taxDef) {
                 const rate = this._getEffectiveTaxRate(taxDef);
@@ -247,7 +247,7 @@ module.exports = ({ strapi }) => ({
       items.forEach((item, idx) => {
         const lineTotal = Math.round(item.price * item.quantity * 100) / 100;
         console.log(
-          `#${idx + 1} Code: ${item.code} | Price: ${item.price} | Qty: ${item.quantity} | Total: ${lineTotal}`
+          `#${idx + 1} Code: ${item.code} | Price: ${item.price} | Qty: ${item.quantity} | Total: ${lineTotal}`,
         );
       });
       console.log("================================");
@@ -311,14 +311,14 @@ module.exports = ({ strapi }) => ({
     for (const orderProduct of orderProducts) {
       if (!orderProduct.product) {
         throw new Error(
-          `OrderProduct ID ${orderProduct.id} no tiene producto asociado`
+          `OrderProduct ID ${orderProduct.id} no tiene producto asociado`,
         );
       }
       const product = orderProduct.product;
       // Validar que el producto tenga siigoId
       if (!product.siigoId) {
         throw new Error(
-          `El producto ${product.name} (Code: ${product.code}) no tiene siigoId. Debe sincronizarse con Siigo primero.`
+          `El producto ${product.name} (Code: ${product.code}) no tiene siigoId. Debe sincronizarse con Siigo primero.`,
         );
       }
       // La cantidad ya viene ajustada por invoicePercentage desde splitOrderProductsForDualInvoices
@@ -340,7 +340,7 @@ module.exports = ({ strapi }) => ({
         taxedPrice = Number(originalPrice.toFixed(6));
 
         console.log(
-          `Producto ${product.code}: IVA incluido via taxed_price. Base (6 dec): ${basePrice}, Taxed: ${taxedPrice}`
+          `Producto ${product.code}: IVA incluido via taxed_price. Base (6 dec): ${basePrice}, Taxed: ${taxedPrice}`,
         );
       } else {
         // Lógica estándar para precios sin IVA
@@ -393,7 +393,7 @@ module.exports = ({ strapi }) => ({
           // Esto arregla el caso donde 2.5% se guardó como 0.03 por redondeo
           if (Math.abs(rate - nameRate) > 0.001) {
             console.warn(
-              `[TAX-FIX] Tax "${tax.name}" tiene valor ${rate} pero el nombre indica ${nameRate}. Usando ${nameRate}.`
+              `[TAX-FIX] Tax "${tax.name}" tiene valor ${rate} pero el nombre indica ${nameRate}. Usando ${nameRate}.`,
             );
             return nameRate;
           }
@@ -418,7 +418,7 @@ module.exports = ({ strapi }) => ({
     }
     // Solo procesar taxes de tipo "product" (los de subtotal se manejan en retentions)
     const productTaxes = customer.taxes.filter(
-      ({ applicationType }) => applicationType === "product"
+      ({ applicationType }) => applicationType === "product",
     );
     let totalRate = 0;
     for (const tax of productTaxes) {
@@ -458,7 +458,7 @@ module.exports = ({ strapi }) => ({
         // Validar que el tax tenga siigoCode
         if (!tax.siigoCode) {
           console.warn(
-            `Tax "${tax.name}" no tiene siigoCode configurado, se omitirá en la factura`
+            `Tax "${tax.name}" no tiene siigoCode configurado, se omitirá en la factura`,
           );
           continue;
         }
@@ -530,7 +530,7 @@ module.exports = ({ strapi }) => ({
         // Validar que el tax tenga siigoCode
         if (!tax.siigoCode) {
           console.warn(
-            `Tax "${tax.name}" no tiene siigoCode configurado, se omitirá en retenciones`
+            `Tax "${tax.name}" no tiene siigoCode configurado, se omitirá en retenciones`,
           );
           continue;
         }
@@ -565,7 +565,7 @@ module.exports = ({ strapi }) => ({
         if (shouldApply) {
           // Formato de retention para Siigo: solo necesita el ID
           console.log(
-            `Adding retention from tax: ${tax.name} (Siigo Code: ${tax.siigoCode})`
+            `Adding retention from tax: ${tax.name} (Siigo Code: ${tax.siigoCode})`,
           );
           retentions.push({
             id: parseInt(tax.siigoCode),
@@ -602,7 +602,7 @@ module.exports = ({ strapi }) => ({
     if (order.siigoIdTypeA || order.siigoId) {
       const invoiceId = order.siigoIdTypeA || order.siigoId;
       errors.push(
-        `La orden ya tiene una factura asociada en Siigo (ID: ${invoiceId})`
+        `La orden ya tiene una factura asociada en Siigo (ID: ${invoiceId})`,
       );
     }
 
@@ -612,12 +612,12 @@ module.exports = ({ strapi }) => ({
     } else {
       if (!order.customerForInvoice.siigoId) {
         errors.push(
-          `El cliente ${order.customerForInvoice.name} no está sincronizado con Siigo`
+          `El cliente ${order.customerForInvoice.name} no está sincronizado con Siigo`,
         );
       }
       if (!order.customerForInvoice.identification) {
         errors.push(
-          `El cliente ${order.customerForInvoice.name} no tiene número de identificación`
+          `El cliente ${order.customerForInvoice.name} no tiene número de identificación`,
         );
       }
     }
@@ -631,7 +631,7 @@ module.exports = ({ strapi }) => ({
           errors.push(`OrderProduct ID ${op.id} no tiene producto asociado`);
         } else if (!op.product.siigoId) {
           errors.push(
-            `Producto ${op.product.name} no está sincronizado con Siigo`
+            `Producto ${op.product.name} no está sincronizado con Siigo`,
           );
         }
       }
@@ -717,7 +717,21 @@ module.exports = ({ strapi }) => ({
             number: customer.phone || "",
           },
         },
+        ...(customer.seller
+          ? [
+              {
+                first_name: customer.seller.name,
+                last_name: customer.seller.lastName || "",
+                email: customer.seller.email || "",
+                phone: {
+                  number: customer.seller.phone || "",
+                },
+              },
+            ]
+          : []),
       ];
+      siigoCustomer.email = customer.email || "";
+      siigoCustomer.phones = [{ number: customer.phone || "" }];
     }
 
     // Agregar dirección si existe
@@ -742,6 +756,10 @@ module.exports = ({ strapi }) => ({
       };
     }
 
+    if (customer.companyName) {
+      siigoCustomer.commercial_name = customer.companyName;
+    }
+
     return siigoCustomer;
   },
 
@@ -762,7 +780,7 @@ module.exports = ({ strapi }) => ({
       localCustomer.name = formatName(siigoCustomer.name[0]);
       if (siigoCustomer.name.length > 1) {
         localCustomer.lastName = formatName(
-          siigoCustomer.name.slice(1).join(" ")
+          siigoCustomer.name.slice(1).join(" "),
         );
       }
     } else {
@@ -807,7 +825,7 @@ module.exports = ({ strapi }) => ({
             {
               filters: { code: cityCode },
               limit: 1,
-            }
+            },
           );
 
           if (territories && territories.length > 0) {
@@ -816,7 +834,7 @@ module.exports = ({ strapi }) => ({
         } catch (error) {
           console.warn(
             `No se pudo vincular territorio para código ${cityCode}:`,
-            error.message
+            error.message,
           );
         }
       }
@@ -839,7 +857,7 @@ module.exports = ({ strapi }) => ({
           {
             filters: { siigoCode: sellerId },
             limit: 1,
-          }
+          },
         );
 
         if (sellers && sellers.length > 0) {
@@ -848,9 +866,13 @@ module.exports = ({ strapi }) => ({
       } catch (error) {
         console.warn(
           `No se pudo vincular vendedor para ID ${sellerId}:`,
-          error.message
+          error.message,
         );
       }
+    }
+
+    if (siigoCustomer.commercial_name) {
+      localCustomer.companyName = siigoCustomer.commercial_name;
     }
 
     return localCustomer;
@@ -961,7 +983,7 @@ module.exports = ({ strapi }) => ({
 
     // Agregar account_group (requerido por Siigo)
     const categoryObj = productCategories.find(
-      (c) => c.value === product.category
+      (c) => c.value === product.category,
     );
     siigoProduct.account_group = categoryObj ? categoryObj.id : 625; // 625 = Confección (default)
 
@@ -989,7 +1011,7 @@ module.exports = ({ strapi }) => ({
     const unit = units.find((u) => u.code == unitCode);
     localProduct.unit = unit ? unit.value : "unit";
     const category = productCategories.find(
-      (c) => c.id == siigoProduct?.account_group?.id
+      (c) => c.id == siigoProduct?.account_group?.id,
     );
     localProduct.category = category ? category.value : "Confeccion";
     return localProduct;
