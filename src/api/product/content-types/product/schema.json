@@ -110,6 +110,17 @@
       "relation": "manyToOne",
       "target": "api::transformation-factor.transformation-factor",
       "inversedBy": "products"
+    },
+    "canCut": {
+      "type": "boolean",
+      "default": false
+    },
+    "cutUnit": {
+      "type": "enumeration",
+      "enum": ["kg", "m", "unit", "piece"]
+    },
+    "cutTransformationFactor": {
+      "type": "decimal"
     }
   }
 }

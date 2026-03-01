@@ -975,6 +975,7 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
   };
   attributes: {
     barcode: Schema.Attribute.UID;
+    canCut: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     category: Schema.Attribute.Enumeration<
       ['Confeccion', 'Tapiceria', 'PrintLab']
     > &
@@ -987,6 +988,8 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    cutTransformationFactor: Schema.Attribute.Decimal;
+    cutUnit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']>;
     defaultCutProduct: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<false>;
     description: Schema.Attribute.Text;
