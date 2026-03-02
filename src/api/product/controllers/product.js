@@ -184,6 +184,43 @@ module.exports = createCoreController("api::product.product", ({ strapi }) => ({
       });
     }
   },
+
+  async delete(ctx) {
+    try {
+      const { id } = ctx.params;
+      const productService = strapi.service("api::product.product");
+
+      if (!id) {
+        throw new Error("Product ID is required");
+      }
+
+      const product = await productService.delete(id, ctx.query);
+
+      return {
+        data: product,
+        meta: {},
+      };
+    } catch (error) {
+      logger.error("Error deleting product:", error);
+
+      if (
+        error.message.includes(
+          "No puedes eliminar un producto que tenga órdenes asociadas.",
+        )
+      ) {
+        return ctx.badRequest(error.message);
+      }
+
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductDeleteError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
   /**
    * Obtiene los items de un producto con sus movimientos e historial
    * GET /api/products/:productId/items

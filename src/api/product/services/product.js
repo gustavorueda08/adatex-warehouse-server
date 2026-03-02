@@ -249,6 +249,36 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
   },
 
   /**
+   * Deletes a product if it doesn't have any order associated
+   * @param {string|number} id
+   * @param {Object} params
+   * @returns {Object} Deleted product
+   */
+  async delete(id, params) {
+    const product = await strapi.entityService.findOne(SERVICE_UID, id, {
+      populate: ["orderProducts"],
+    });
+
+    if (!product) {
+      throw new Error(`Product with ID ${id} not found`);
+    }
+
+    if (product.orderProducts && product.orderProducts.length > 0) {
+      const { errors } = require("@strapi/utils");
+      throw new errors.ApplicationError(
+        "No puedes eliminar un producto que tenga órdenes asociadas.",
+      );
+    }
+
+    const deletedProduct = await strapi.entityService.delete(
+      SERVICE_UID,
+      id,
+      params,
+    );
+    return deletedProduct;
+  },
+
+  /**
    * Obtiene products con inventario calculado
    * @param {Object} params - Query params de Strapi
    * @returns {Object} - Resultados paginados con inventario

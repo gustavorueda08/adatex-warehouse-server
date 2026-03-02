@@ -688,13 +688,18 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           const smartCutWarehouses = await strapi.entityService.findMany(
             require("../../../utils/services").WAREHOUSE_SERVICE,
             {
-              filters: { type: "smartCut", isActive: true },
+              filters: {
+                type: { $in: ["smartCut", "printLab"] },
+                isActive: true,
+              },
               transacting: trx,
             },
           );
 
           if (smartCutWarehouses.length === 0) {
-            throw new Error("No hay bodegas configuradas como smartCut");
+            throw new Error(
+              "No hay bodegas configuradas como smartCut o printLab",
+            );
           }
           const smartCutWhIds = smartCutWarehouses.map((w) => w.id);
 
@@ -724,7 +729,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
             if (availableParentItems.length === 0) {
               throw new Error(
-                `No hay items de ${product.parentProduct.name} disponibles en bodegas smartCut para cortar.`,
+                `No hay items de ${product.parentProduct.name} disponibles en bodegas smartCut o printLab para cortar.`,
               );
             }
 
