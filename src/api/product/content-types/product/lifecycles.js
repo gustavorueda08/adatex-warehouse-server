@@ -7,6 +7,15 @@ const { PRODUCT_SERVICE } = require("../../../../utils/services");
  * Sincroniza automáticamente con Siigo en cada operación CRUD
  */
 
+function sanitizeProductCode(code) {
+  if (!code) return code;
+  return String(code)
+    .toUpperCase()
+    .trim()
+    .replace(/[\s]+/g, "-")
+    .replace(/[^\w-]/g, "");
+}
+
 /**
  * Helper function to auto-create or update a child 'cutItem' product and transformation factor.
  */
@@ -223,7 +232,9 @@ module.exports = {
           proposedCode = `${baseCode}-${String(currentIndex).padStart(2, "0")}`;
         }
 
-        data.code = proposedCode;
+        data.code = sanitizeProductCode(proposedCode);
+      } else if (data.code) {
+        data.code = sanitizeProductCode(data.code);
       }
 
       // Logic for automatic sequential barcode generation if not provided
@@ -276,6 +287,23 @@ module.exports = {
     } catch (error) {
       console.error(
         "[Product Lifecycle] Error en beforeCreate:",
+        error.message,
+      );
+    }
+  },
+
+  /**
+   * Hook que se ejecuta antes de actualizar un product
+   */
+  async beforeUpdate(event) {
+    try {
+      const { params } = event;
+      if (params && params.data && params.data.code) {
+        params.data.code = sanitizeProductCode(params.data.code);
+      }
+    } catch (error) {
+      console.error(
+        "[Product Lifecycle] Error en beforeUpdate:",
         error.message,
       );
     }

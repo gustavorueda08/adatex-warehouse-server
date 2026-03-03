@@ -49,12 +49,12 @@ module.exports = ({ strapi }) => ({
           `${apiUrl}/v1/products/${siigoId}`,
           {
             method: "GET",
-          }
+          },
         );
 
         if (!response.ok) {
           throw new Error(
-            `Error HTTP ${response.status}: ${response.statusText}`
+            `Error HTTP ${response.status}: ${response.statusText}`,
           );
         }
 
@@ -90,17 +90,24 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al sincronizar product ${siigoId} desde Siigo:`,
-        error.message
+        error.message,
       );
       throw new Error(
-        `Error al sincronizar product desde Siigo: ${error.message}`
+        `Error al sincronizar product desde Siigo: ${error.message}`,
       );
     }
   },
 
   async searchInSiigoByCode(code) {
     try {
-      console.log(`Buscando product en Siigo por code: ${code}...`);
+      const sanitizedCode = code
+        ? String(code)
+            .toUpperCase()
+            .trim()
+            .replace(/[\s]+/g, "-")
+            .replace(/[^\w-]/g, "")
+        : code;
+      console.log(`Buscando product en Siigo por code: ${sanitizedCode}...`);
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
@@ -121,12 +128,12 @@ module.exports = ({ strapi }) => ({
           `${apiUrl}/v1/products?page=${page}&page_size=${pageSize}`,
           {
             method: "GET",
-          }
+          },
         );
 
         if (!response.ok) {
           throw new Error(
-            `Error HTTP ${response.status}: ${response.statusText}`
+            `Error HTTP ${response.status}: ${response.statusText}`,
           );
         }
 
@@ -135,7 +142,7 @@ module.exports = ({ strapi }) => ({
 
         if (Array.isArray(products) && products.length > 0) {
           const found = products.find(
-            (product) => String(product.code) === String(code)
+            (product) => String(product.code) === String(code),
           );
 
           if (found) {
@@ -167,7 +174,7 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al buscar product por code ${code} en Siigo:`,
-        error.message
+        error.message,
       );
       return null;
     }
@@ -184,7 +191,7 @@ module.exports = ({ strapi }) => ({
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
-        productId
+        productId,
       );
 
       if (!product) {
@@ -199,10 +206,10 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al sincronizar product ${productId} hacia Siigo:`,
-        error.message
+        error.message,
       );
       throw new Error(
-        `Error al sincronizar product hacia Siigo: ${error.message}`
+        `Error al sincronizar product hacia Siigo: ${error.message}`,
       );
     }
   },
@@ -218,7 +225,7 @@ module.exports = ({ strapi }) => ({
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
-        productId
+        productId,
       );
 
       if (!product) {
@@ -227,7 +234,7 @@ module.exports = ({ strapi }) => ({
 
       if (product.siigoId) {
         throw new Error(
-          `Product ${productId} ya tiene siigoId: ${product.siigoId}`
+          `Product ${productId} ya tiene siigoId: ${product.siigoId}`,
         );
       }
 
@@ -253,14 +260,14 @@ module.exports = ({ strapi }) => ({
           {
             method: "POST",
             body: JSON.stringify(siigoProductData),
-          }
+          },
         );
 
         if (!response.ok) {
           const errorData = await response.text();
           console.error("Error de Siigo:", errorData);
           throw new Error(
-            `Error HTTP ${response.status}: ${response.statusText}`
+            `Error HTTP ${response.status}: ${response.statusText}`,
           );
         }
 
@@ -274,7 +281,7 @@ module.exports = ({ strapi }) => ({
       });
 
       console.log(
-        `Product ${productId} creado en Siigo con ID: ${siigoProduct.id}`
+        `Product ${productId} creado en Siigo con ID: ${siigoProduct.id}`,
       );
 
       return {
@@ -286,7 +293,7 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al crear product ${productId} en Siigo:`,
-        error.message
+        error.message,
       );
       throw new Error(`Error al crear product en Siigo: ${error.message}`);
     }
@@ -303,7 +310,7 @@ module.exports = ({ strapi }) => ({
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
-        productId
+        productId,
       );
 
       if (!product) {
@@ -312,7 +319,7 @@ module.exports = ({ strapi }) => ({
 
       if (!product.siigoId) {
         throw new Error(
-          `Product ${productId} no tiene siigoId. Use createInSiigo en su lugar.`
+          `Product ${productId} no tiene siigoId. Use createInSiigo en su lugar.`,
         );
       }
 
@@ -338,14 +345,14 @@ module.exports = ({ strapi }) => ({
           {
             method: "PUT",
             body: JSON.stringify(siigoProductData),
-          }
+          },
         );
 
         if (!response.ok) {
           const errorData = await response.text();
           console.error("Error de Siigo:", errorData);
           throw new Error(
-            `Error HTTP ${response.status}: ${response.statusText}`
+            `Error HTTP ${response.status}: ${response.statusText}`,
           );
         }
 
@@ -353,7 +360,7 @@ module.exports = ({ strapi }) => ({
       }
 
       console.log(
-        `Product ${productId} actualizado en Siigo ID: ${product.siigoId}`
+        `Product ${productId} actualizado en Siigo ID: ${product.siigoId}`,
       );
 
       return {
@@ -365,7 +372,7 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al actualizar product ${productId} en Siigo:`,
-        error.message
+        error.message,
       );
       throw new Error(`Error al actualizar product en Siigo: ${error.message}`);
     }
@@ -382,7 +389,7 @@ module.exports = ({ strapi }) => ({
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
-        productId
+        productId,
       );
 
       if (!product) {
@@ -391,7 +398,7 @@ module.exports = ({ strapi }) => ({
 
       if (!product.siigoId) {
         throw new Error(
-          `Product ${productId} no tiene siigoId, no hay nada que eliminar en Siigo`
+          `Product ${productId} no tiene siigoId, no hay nada que eliminar en Siigo`,
         );
       }
 
@@ -409,14 +416,14 @@ module.exports = ({ strapi }) => ({
           {
             method: "PUT",
             body: JSON.stringify({ active: false }),
-          }
+          },
         );
 
         if (!response.ok) {
           const errorData = await response.text();
           console.error("Error de Siigo:", errorData);
           throw new Error(
-            `Error HTTP ${response.status}: ${response.statusText}`
+            `Error HTTP ${response.status}: ${response.statusText}`,
           );
         }
       }
@@ -428,7 +435,7 @@ module.exports = ({ strapi }) => ({
       });
 
       console.log(
-        `Product ${productId} marcado como inactivo en Siigo ID: ${product.siigoId}`
+        `Product ${productId} marcado como inactivo en Siigo ID: ${product.siigoId}`,
       );
 
       return {
@@ -440,7 +447,7 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         `Error al eliminar product ${productId} en Siigo:`,
-        error.message
+        error.message,
       );
       throw new Error(`Error al eliminar product en Siigo: ${error.message}`);
     }
@@ -456,7 +463,7 @@ module.exports = ({ strapi }) => ({
       const { page = 1, pageSize = 100 } = options;
 
       console.log(
-        `Listando products desde Siigo (página ${page}, ${pageSize} por página)...`
+        `Listando products desde Siigo (página ${page}, ${pageSize} por página)...`,
       );
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
@@ -490,12 +497,12 @@ module.exports = ({ strapi }) => ({
         `${apiUrl}/v1/products?page=${page}&page_size=${pageSize}`,
         {
           method: "GET",
-        }
+        },
       );
 
       if (!response.ok) {
         throw new Error(
-          `Error HTTP ${response.status}: ${response.statusText}`
+          `Error HTTP ${response.status}: ${response.statusText}`,
         );
       }
 
@@ -520,7 +527,7 @@ module.exports = ({ strapi }) => ({
       console.log("Iniciando sincronización masiva de products desde Siigo...");
 
       const allowedCategoryIds = new Set(
-        productCategories.map((category) => String(category.id))
+        productCategories.map((category) => String(category.id)),
       );
 
       let allProducts = [];
@@ -565,7 +572,7 @@ module.exports = ({ strapi }) => ({
           const accountGroupId = siigoProduct?.account_group?.id;
           if (!allowedCategoryIds.has(String(accountGroupId))) {
             console.log(
-              `Product ${siigoProduct.id} omitido por account_group.id no permitido (${accountGroupId})`
+              `Product ${siigoProduct.id} omitido por account_group.id no permitido (${accountGroupId})`,
             );
             skipped++;
             continue;
@@ -576,7 +583,7 @@ module.exports = ({ strapi }) => ({
             {
               filters: { siigoId: String(siigoProduct.id) },
               limit: 1,
-            }
+            },
           );
 
           await this.syncFromSiigo(siigoProduct.id);
@@ -589,7 +596,7 @@ module.exports = ({ strapi }) => ({
         } catch (error) {
           console.error(
             `Error al sincronizar product ${siigoProduct.id}:`,
-            error.message
+            error.message,
           );
           failed++;
         }
@@ -610,10 +617,10 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         "Error al sincronizar products desde Siigo:",
-        error.message
+        error.message,
       );
       throw new Error(
-        `Error en sincronización masiva de products: ${error.message}`
+        `Error en sincronización masiva de products: ${error.message}`,
       );
     }
   },
@@ -628,7 +635,7 @@ module.exports = ({ strapi }) => ({
 
       const localProducts = await strapi.entityService.findMany(
         PRODUCT_SERVICE,
-        {}
+        {},
       );
 
       if (!localProducts || localProducts.length === 0) {
@@ -662,7 +669,7 @@ module.exports = ({ strapi }) => ({
         } catch (error) {
           console.error(
             `Error al sincronizar product ${product.id}:`,
-            error.message
+            error.message,
           );
           failed++;
         }
@@ -683,10 +690,10 @@ module.exports = ({ strapi }) => ({
     } catch (error) {
       console.error(
         "Error al sincronizar products hacia Siigo:",
-        error.message
+        error.message,
       );
       throw new Error(
-        `Error en sincronización masiva hacia Siigo: ${error.message}`
+        `Error en sincronización masiva hacia Siigo: ${error.message}`,
       );
     }
   },

@@ -963,7 +963,13 @@ module.exports = ({ strapi }) => ({
    */
   async mapProductToSiigo(product) {
     const siigoProduct = {
-      code: product.code,
+      code: product.code
+        ? String(product.code)
+            .toUpperCase()
+            .trim()
+            .replace(/[\s]+/g, "-")
+            .replace(/[^\w-]/g, "")
+        : product.code,
       name: product.name,
       description: product.description || product.name,
       type: "Product", // Por defecto producto
