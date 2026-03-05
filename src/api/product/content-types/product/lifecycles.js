@@ -82,8 +82,8 @@ async function syncCutProduct(productData, productId) {
       "api::transformation-factor.transformation-factor",
       {
         filters: {
-          sourceUnit: cutUnit,
-          destinationUnit: unit,
+          sourceUnit: unit,
+          destinationUnit: cutUnit,
           factor: cutTransformationFactor,
         },
       },
@@ -92,14 +92,14 @@ async function syncCutProduct(productData, productId) {
     if (existingFactors && existingFactors.length > 0) {
       factorId = existingFactors[0].id;
     } else {
-      const factorName = `De ${cutUnit} a ${unit} (x${cutTransformationFactor})`;
+      const factorName = `De ${unit} a ${cutUnit} (x${cutTransformationFactor})`;
       const newFactor = await strapi.entityService.create(
         "api::transformation-factor.transformation-factor",
         {
           data: {
             name: factorName,
-            sourceUnit: cutUnit,
-            destinationUnit: unit,
+            sourceUnit: unit,
+            destinationUnit: cutUnit,
             factor: cutTransformationFactor,
           },
         },

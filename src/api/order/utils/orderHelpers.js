@@ -383,15 +383,27 @@ const updateOrderProducts = async (
       }
 
       // Agregar el item
-      await strapi.service(ORDER_SERVICE).doItemMovement({
-        movementType: ITEM_MOVEMENT_TYPES.CREATE,
-        item,
-        order: currentOrder,
-        orderProduct: orderProduct,
-        product: orderProduct.product,
-        orderState,
-        trx,
-      });
+      // Agregar el item
+      // IMPORTANTE: Para productos como cutItem que no tienen un ID asignado todavía y requieren lógica compleja (como TransformationStrategy),
+      // debemos usar `addItem` en lugar de llamar a `doItemMovement` directamente, ya que `addItem` contiene la lógica de negocio
+      // necesaria para buscar el rollo padre y realizar el corte.
+      if (!item.id && orderProduct.product?.type === "cutItem") {
+        await strapi.service(ORDER_SERVICE).addItem({
+          id: currentOrder.id,
+          item: item,
+          product: productId,
+        });
+      } else {
+        await strapi.service(ORDER_SERVICE).doItemMovement({
+          movementType: ITEM_MOVEMENT_TYPES.CREATE,
+          item,
+          order: currentOrder,
+          orderProduct: orderProduct,
+          product: orderProduct.product,
+          orderState,
+          trx,
+        });
+      }
     },
     1,
   );
