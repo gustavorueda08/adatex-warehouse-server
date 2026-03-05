@@ -96,14 +96,33 @@ module.exports = createCoreService(
           ORDER_PRODUCT_SERVICE,
           id,
           {
-            populate: ["items"],
+            populate: ["items", "product"],
             ...(data.trx ? { transacting: data.trx } : {}),
           },
         );
         // Cantidades a modificar
         let quantities = {};
+
         // Modificación de cantidades según los Items del OrderProduct
-        if (!items) {
+        if (currentOrderProduct.product?.type === "service") {
+          // Prevent calculating via items. Just inherit what was requested.
+          const currentRequested = currentOrderProduct.requestedQuantity || 0;
+          const updatedRequested =
+            dataToUpdate.requestedQuantity !== undefined
+              ? dataToUpdate.requestedQuantity
+              : currentRequested;
+
+          quantities = {
+            confirmedQuantity: updatedRequested,
+            confirmedPackages: 1,
+            deliveredQuantity:
+              orderState === ORDER_STATES.COMPLETED ? updatedRequested : 0,
+            deliveredPackages: orderState === ORDER_STATES.COMPLETED ? 1 : 0,
+          };
+          if (orderState === ORDER_STATES.COMPLETED) {
+            dataToUpdate.state = ORDER_PRODUCT_STATES.COMPLETED;
+          }
+        } else if (!items) {
           // Si no vienen los Items, entonces modificamos con las cantidades del OrderProduct con sus Items asociados
           quantities = currentOrderProduct.items.reduce(
             (acc, item) => {

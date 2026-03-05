@@ -1034,7 +1034,7 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
       'api::transformation-factor.transformation-factor'
     >;
     type: Schema.Attribute.Enumeration<
-      ['variableQuantityPerItem', 'fixedQuantityPerItem', 'cutItem']
+      ['variableQuantityPerItem', 'fixedQuantityPerItem', 'cutItem', 'service']
     > &
       Schema.Attribute.DefaultTo<'variableQuantityPerItem'>;
     unit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']>;

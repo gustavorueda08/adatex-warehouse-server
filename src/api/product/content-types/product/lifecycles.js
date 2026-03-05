@@ -322,7 +322,7 @@ module.exports = {
         Array.isArray(params.data.collections) &&
         params.data.collections.length > 0;
 
-      if (!hasCollections && result.name) {
+      if (!hasCollections && result.name && result.type !== "cutItem") {
         // Extract category name: "Piel de Durazno - 175" -> "Piel de Durazno"
         // Split by " - " or " / "
         const parts = result.name.split(/\s-\s|\s\/\s/);

@@ -185,7 +185,13 @@ const updateOrderProducts = async (
 
     let finalItems = items;
 
-    if (fetchedProduct.type === "fixedQuantityPerItem" && count !== undefined) {
+    if (fetchedProduct.type === "service") {
+      // Services don't handle physical items
+      finalItems = [];
+    } else if (
+      fetchedProduct.type === "fixedQuantityPerItem" &&
+      count !== undefined
+    ) {
       const currentItemsForProduct =
         currentOrder.orderProducts.find((op) => op.product.id === productId)
           ?.items || [];

@@ -605,7 +605,17 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         let addedItemsList = [];
 
-        if (
+        if (product.type === "service") {
+          // Service items have no physical tracking. We do not do a DB Item lookup nor movement.
+          // They simply serve to attach to an OrderProduct.
+          const pseudoServiceItem = {
+            id: `service-${Date.now()}`,
+            currentQuantity: item.count || item.quantity || 1,
+            isService: true,
+          };
+          // Push a lightweight pseudo-object so the frontend gets an immediate sync hook via websockets
+          addedItemsList.push(pseudoServiceItem);
+        } else if (
           product.type === "fixedQuantityPerItem" &&
           item.count !== undefined
         ) {

@@ -972,18 +972,21 @@ module.exports = ({ strapi }) => ({
         : product.code,
       name: product.name,
       description: product.description || product.name,
-      type: "Product", // Por defecto producto
+      type: product.type === "service" ? "Service" : "Product",
       active: product.isActive !== false,
     };
 
-    // Mapear unidad de medida
+    if (product.type === "service") {
+      siigoProduct.stock_control = false;
+    }
+
     // Mapear unidad de medida
     const unitObj = units.find((u) => u.value === product.unit);
     // Si no encuentra, usa "94" (Unidad) por defecto. Se envía como string (código).
     siigoProduct.unit = unitObj ? unitObj.code : "94";
 
     // Agregar barcode como reference
-    if (product.barcode) {
+    if (product.barcode && product.type !== "service") {
       siigoProduct.reference = product.barcode;
     }
 

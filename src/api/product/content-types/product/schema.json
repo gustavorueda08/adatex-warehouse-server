@@ -87,7 +87,12 @@
     "type": {
       "type": "enumeration",
       "default": "variableQuantityPerItem",
-      "enum": ["variableQuantityPerItem", "fixedQuantityPerItem", "cutItem"]
+      "enum": [
+        "variableQuantityPerItem",
+        "fixedQuantityPerItem",
+        "cutItem",
+        "service"
+      ]
     },
     "productsForCuts": {
       "type": "relation",
