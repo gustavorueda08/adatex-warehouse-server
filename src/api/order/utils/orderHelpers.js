@@ -220,40 +220,10 @@ const updateOrderProducts = async (
       } else {
         finalItems = currentItemsForProduct.slice(0, count);
       }
-    } else if (
-      fetchedProduct.type === "cutItem" ||
-      fetchedProduct.type === "variableQuantityPerItem"
-    ) {
-      // For cutItem or variableQuantityPerItem, the frontend often just sends the requested array of items directly.
-      // E.g items: [{ quantity: 15 }, { quantity: 10 }]
-      // If they passed `requestedQuantity` but no explicit items, we can infer they want 1 piece of that quantity
-      // or we just trust the items array. Let's make sure things aren't dropped if they just sent requestedQuantity.
-      if (items.length === 0 && productReq.requestedQuantity) {
-        // Only do this auto-generation if the order state is DRAFT or CONFIRMED where items are editable
-        // Wait, if it's an update, they might just be syncing quantities.
-        // Actually, for cutItems, we typically need explicit items to generate cuts.
-        // But if the frontend just passed requestedQuantity and items=[], it will delete the existing items!
-        // The best approach is to check if it's cutItem and they requested a quantity, we create a pseudo-item to trigger the cut logic.
-        // Wait, what if they just didn't modify the items? If they pass `items: []`, it means delete all items.
-        // Let's rely on the frontend explicitly passing `items` or `quantities` for cut item.
-        // Actually, if they pass `requestedQuantity` and NO `items`, and the product is cutItem, let's auto-generate a pseudo-item
-        // that will be processed by doItemMovement as an addition if the current items are empty.
-        // Wait, if the frontend just sends `requestedQuantity: 100`, we should translate that to an `item: { quantity: 100 }`.
-
-        // If there are existing items, they should ideally be passed back from the frontend to preserve their IDs.
-        // If frontend didn't pass items back, they get deleted. Let's provide a fallback: just map the requestedQuantity to a single item.
-        if (
-          fetchedProduct.type === "cutItem" &&
-          currentOrder.orderProducts.find((op) => op.product.id === productId)
-            ?.items?.length > 0
-        ) {
-          // If they already have items, we don't auto-generate to avoid re-cutting. Frontend should send the items array.
-          finalItems = items;
-        } else if (fetchedProduct.type === "cutItem") {
-          finalItems = [{ quantity: productReq.requestedQuantity }];
-        }
-      }
     }
+
+    // Auto-generation is disabled for cutItem/variableQuantityPerItem.
+    // The frontend's explicit items array determines the order items.
 
     for (const item of finalItems) {
       itemsFromRequest.push({

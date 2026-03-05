@@ -1,7 +1,7 @@
 const WAREHOUSE_TYPES = {
   STOCK: "stock",
   PRODUCTION: "production",
-  PRINT_LAB: "printLab",
+  PRINT_LAB: "printlab",
   TRANSIT: "transit",
 };
 

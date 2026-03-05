@@ -990,6 +990,8 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     cutTransformationFactor: Schema.Attribute.Decimal;
     cutUnit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']>;
+    cutWarehouseType: Schema.Attribute.Enumeration<['smartCut', 'printlab']> &
+      Schema.Attribute.DefaultTo<'smartCut'>;
     defaultCutProduct: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<false>;
     description: Schema.Attribute.Text;

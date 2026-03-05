@@ -41,7 +41,7 @@ module.exports = ({ strapi }) => ({
                 {
                   populate: ["items", "items.product", "items.sourceOrder"],
                 },
-                { transacting: trx }
+                { transacting: trx },
               );
               if (!warehouse)
                 throw new Error(`La bodega con id ${id} no existe`);
@@ -55,7 +55,7 @@ module.exports = ({ strapi }) => ({
                 filters,
                 populate: ["items", "items.product", "items.sourceOrder"],
               },
-              { transacting: trx }
+              { transacting: trx },
             );
           }
           // Creación del inventoryByWarehoyse
@@ -90,7 +90,7 @@ module.exports = ({ strapi }) => ({
                     accItem[id].packages += 1;
                     return accItem;
                   },
-                  {}
+                  {},
                 );
                 Object.entries(groupedProducts).forEach(
                   ([productId, product]) => {
@@ -99,7 +99,7 @@ module.exports = ({ strapi }) => ({
                     } else {
                       const items = product.items;
                       acc[warehouse.id].products[productId].items.push(
-                        ...items
+                        ...items,
                       );
                       items.forEach((item) => {
                         acc[warehouse.id].products[productId].quantity +=
@@ -107,21 +107,21 @@ module.exports = ({ strapi }) => ({
                         acc[warehouse.id].products[productId].packages += 1;
                       });
                     }
-                  }
+                  },
                 );
               }
               acc[warehouse.id].products = Object.values(
-                acc[warehouse.id].products
+                acc[warehouse.id].products,
               );
               return acc;
-            }, {})
+            }, {}),
           );
           return inventoryByWarehouse;
         });
       } catch (error) {
         throw error;
       }
-    }
+    },
   ),
   inventoryByProduct: withValidation(InventoryByProductSchema, async (data) => {
     try {
@@ -138,8 +138,8 @@ module.exports = ({ strapi }) => ({
               {
                 populate: ["items", "items.warehouse"],
               },
-              { transacting: trx }
-            )
+              { transacting: trx },
+            ),
           );
         } else {
           // Si no llegan productIds entonces traemos todos los productos
@@ -148,7 +148,7 @@ module.exports = ({ strapi }) => ({
             {
               populate: ["items", "items.warehouse"],
             },
-            { transacting: trx }
+            { transacting: trx },
           );
         }
         if (!products) throw new Error("Error al obtener los productos");
@@ -166,7 +166,7 @@ module.exports = ({ strapi }) => ({
             },
             populate: ["product"],
           },
-          { transacting: trx }
+          { transacting: trx },
         );
         if (!inOrderProducts)
           throw new Error("Error al obtener los productos de compras");
@@ -199,7 +199,7 @@ module.exports = ({ strapi }) => ({
             },
             populate: ["product"],
           },
-          { transacting: trx }
+          { transacting: trx },
         );
 
         if (!outOrderProducts)
@@ -219,18 +219,18 @@ module.exports = ({ strapi }) => ({
             acc[id].requestedPackages += 1;
             return acc;
           },
-          {}
+          {},
         );
 
         // Creación de Helper para filtrar items por estado y bodega
         const filterHelper = (items = [], state, warehouseType) => {
           const filteredItems = items.filter(
             (item) =>
-              item.state === state && item.warehouse?.type === warehouseType
+              item.state === state && item.warehouse?.type === warehouseType,
           );
           const totalQuantity = filteredItems.reduce(
             (acc, item) => acc + item.currentQuantity,
-            0
+            0,
           );
           return {
             items: filteredItems,
@@ -250,7 +250,7 @@ module.exports = ({ strapi }) => ({
             if (!acc[id]) {
               acc[id] = {
                 ...productData,
-                printLab: [],
+                printlab: [],
                 available: [],
                 reserved: [],
                 inTransit: [],
@@ -282,31 +282,31 @@ module.exports = ({ strapi }) => ({
             const printLabData = filterHelper(
               items,
               ITEM_STATES.AVAILABLE,
-              WAREHOUSE_TYPES.PRINT_LAB
+              WAREHOUSE_TYPES.PRINT_LAB,
             );
-            acc[id].printLab.push(...printLabData.items);
+            acc[id].printlab.push(...printLabData.items);
             const availableData = filterHelper(
               items,
               ITEM_STATES.AVAILABLE,
-              WAREHOUSE_TYPES.STOCK
+              WAREHOUSE_TYPES.STOCK,
             );
             acc[id].available.push(...availableData.items);
             const reservedData = filterHelper(
               items,
               ITEM_STATES.RESERVED,
-              WAREHOUSE_TYPES.STOCK
+              WAREHOUSE_TYPES.STOCK,
             );
             acc[id].reserved.push(...reservedData.items);
             const inTransitData = filterHelper(
               items,
               ITEM_STATES.AVAILABLE,
-              WAREHOUSE_TYPES.TRANSIT
+              WAREHOUSE_TYPES.TRANSIT,
             );
             acc[id].inTransit.push(...inTransitData.items);
             const inProductionData = filterHelper(
               items,
               ITEM_STATES.AVAILABLE,
-              WAREHOUSE_TYPES.PRODUCTION
+              WAREHOUSE_TYPES.PRODUCTION,
             );
             // Agregación de todos los datos al objeto
             acc[id].inProduction.push(...inProductionData.items);
@@ -323,7 +323,7 @@ module.exports = ({ strapi }) => ({
               inTransitData.totalPackages +
               inProductionData.totalPackages;
             return acc;
-          }, {})
+          }, {}),
         );
       });
     } catch (error) {
@@ -351,7 +351,7 @@ module.exports = ({ strapi }) => ({
             filters: warehouseFilters,
             populate: ["items", "items.product"],
           },
-          { transacting: trx }
+          { transacting: trx },
         );
 
         const orderProducts = await strapi.entityService.findMany(
@@ -367,7 +367,7 @@ module.exports = ({ strapi }) => ({
               "order.destinationWarehouse",
             ],
           },
-          { transacting: trx }
+          { transacting: trx },
         );
 
         const inventoryBywarehouse = [];
@@ -375,11 +375,11 @@ module.exports = ({ strapi }) => ({
           //OrderProducts que son de entradas para saber el requested
           const inOrderProducts = orderProducts.filter(
             (orderProduct) =>
-              orderProduct.order?.destinationWarehouse?.id === warehouseData.id
+              orderProduct.order?.destinationWarehouse?.id === warehouseData.id,
           );
           // Filtrar orderProducts de salida para este warehouse
           const outOrderProducts = orderProducts.filter(
-            (op) => op.order?.sourceWarehouse?.id === warehouseData.id
+            (op) => op.order?.sourceWarehouse?.id === warehouseData.id,
           );
 
           const itemsGroupedByProduct = Object.values(
@@ -415,25 +415,25 @@ module.exports = ({ strapi }) => ({
               acc[productId].summary.totalReservedItems +=
                 item.state === ITEM_STATES.RESERVED ? 1 : 0;
               return acc;
-            }, {})
+            }, {}),
           );
 
           // Agregar cantidades solicitadas de salida
           outOrderProducts.forEach((saleOrderProduct) => {
             const productId = saleOrderProduct.product.id;
             const productData = itemsGroupedByProduct.find(
-              (p) => p.id === productId
+              (p) => p.id === productId,
             );
             if (productData) {
               productData.summary.totalOutRequestedQuantity += Math.max(
                 saleOrderProduct.requestedQuantity -
                   saleOrderProduct.confirmedQuantity,
-                0
+                0,
               );
               productData.summary.totalOutRequestedItems += Math.max(
                 saleOrderProduct.requestedPackages -
                   saleOrderProduct.confirmedPackages,
-                0
+                0,
               );
             }
           });
@@ -457,11 +457,11 @@ module.exports = ({ strapi }) => ({
               acc[productId].summary.totalInRequestedItems +=
                 orderProduct.requestedPackages;
               return acc;
-            }, {})
+            }, {}),
           );
           inOrderProductsByProduct.forEach((product) => {
             const productFromItemsGroup = itemsGroupedByProduct.find(
-              (p) => p.id === product.id
+              (p) => p.id === product.id,
             );
             if (productFromItemsGroup) {
               productFromItemsGroup.summary.totalInRequestedQuantity +=
@@ -476,7 +476,7 @@ module.exports = ({ strapi }) => ({
           const productsHaveSameUnit =
             itemsGroupedByProduct.length > 0 &&
             itemsGroupedByProduct.every(
-              (product) => product.unit === itemsGroupedByProduct[0].unit
+              (product) => product.unit === itemsGroupedByProduct[0].unit,
             );
           const summaryData = {
             totalQuantity: 0,
@@ -531,7 +531,7 @@ module.exports = ({ strapi }) => ({
   async getMovements(filters) {
     try {
       const inventoryMovementService = strapi.service(
-        INVENTORY_MOVEMENT_SERVICE
+        INVENTORY_MOVEMENT_SERVICE,
       );
       const inventoryMovements =
         await inventoryMovementService.findMany(filters);
@@ -543,7 +543,7 @@ module.exports = ({ strapi }) => ({
   async getMovementsByProduct({ filters }) {
     try {
       const inventoryMovementService = strapi.service(
-        INVENTORY_MOVEMENT_SERVICE
+        INVENTORY_MOVEMENT_SERVICE,
       );
       const inventoryMovements = await inventoryMovementService.findMany({
         filters,
@@ -646,7 +646,7 @@ module.exports = ({ strapi }) => ({
               break;
           }
           return acc;
-        }, {})
+        }, {}),
       );
       return products;
     } catch (error) {
@@ -688,7 +688,7 @@ module.exports = ({ strapi }) => ({
             "orderProducts.order.customer",
           ],
           limit: -1,
-        }
+        },
       );
 
       const reservations = [];
@@ -875,7 +875,8 @@ module.exports = ({ strapi }) => ({
         // Verificar items próximos a vencer
         if (item.expirationDate) {
           const daysUntilExpiry = Math.floor(
-            (new Date(item.expirationDate) - new Date()) / (1000 * 60 * 60 * 24)
+            (new Date(item.expirationDate).getTime() - new Date().getTime()) /
+              (1000 * 60 * 60 * 24),
           );
 
           if (daysUntilExpiry <= 30 && daysUntilExpiry > 0) {
@@ -941,7 +942,7 @@ module.exports = ({ strapi }) => ({
           };
         }
         grouped[customerId].products[productId].quantity += parseFloat(
-          reservation.item.quantity
+          reservation.item.quantity,
         );
       }
     }
@@ -961,7 +962,7 @@ module.exports = ({ strapi }) => ({
       }
       grouped[warehouseId].totalReservations += 1;
       grouped[warehouseId].totalQuantity += parseFloat(
-        reservation.item.quantity
+        reservation.item.quantity,
       );
     }
     return grouped;

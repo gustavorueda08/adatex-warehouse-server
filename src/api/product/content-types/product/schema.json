@@ -121,6 +121,11 @@
     },
     "cutTransformationFactor": {
       "type": "decimal"
+    },
+    "cutWarehouseType": {
+      "type": "enumeration",
+      "enum": ["smartCut", "printlab"],
+      "default": "smartCut"
     }
   }
 }

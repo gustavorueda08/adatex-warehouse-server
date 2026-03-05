@@ -317,7 +317,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       const stats = {
         stock: 0,
         smartCut: 0,
-        printLab: 0,
+        printlab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -339,7 +339,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           const wType = item.warehouse?.type;
           if (!wType) return;
 
-          const isStockLike = ["stock", "smartCut", "printLab"].includes(wType);
+          const isStockLike = ["stock", "smartCut", "printlab"].includes(wType);
 
           if (isStockLike) {
             if (item.state === "available") {
@@ -392,7 +392,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           }
 
           // Required: draft sale orders from stock warehouse
-          const isSourceStockLike = ["stock", "smartCut", "printLab"].includes(
+          const isSourceStockLike = ["stock", "smartCut", "printlab"].includes(
             order.sourceWarehouse?.type,
           );
           if (order.type === "sale" && isSourceStockLike) {
@@ -403,7 +403,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       }
 
       // ── Derived metrics ──
-      const totalStockLike = stats.stock + stats.smartCut + stats.printLab;
+      const totalStockLike = stats.stock + stats.smartCut + stats.printlab;
       stats.available = Math.max(0, totalStockLike - stats.reserved);
       stats.netAvailable =
         totalStockLike -
@@ -573,7 +573,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       productStats[pid] = {
         stock: 0,
         smartCut: 0,
-        printLab: 0,
+        printlab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -601,7 +601,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           ? warehouseMap[itemState.warehouseId].type
           : null;
 
-      const isStockLike = ["stock", "smartCut", "printLab"].includes(wType);
+      const isStockLike = ["stock", "smartCut", "printlab"].includes(wType);
 
       if (isStockLike) {
         if (itemState.state === "available") {
@@ -696,7 +696,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stats.transit += qty;
         bd?.transit.push(entry);
       }
-      const isSourceStockLike = ["stock", "smartCut", "printLab"].includes(
+      const isSourceStockLike = ["stock", "smartCut", "printlab"].includes(
         op.order.sourceWarehouse?.type,
       );
       if (op.order.type === "sale" && isSourceStockLike) {
@@ -710,7 +710,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       const stats = productStats[product.id] || {
         stock: 0,
         smartCut: 0,
-        printLab: 0,
+        printlab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -720,7 +720,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         netAvailable: 0,
       };
 
-      const totalStockLike = stats.stock + stats.smartCut + stats.printLab;
+      const totalStockLike = stats.stock + stats.smartCut + stats.printlab;
       stats.available = Math.max(0, totalStockLike - stats.reserved);
       stats.netAvailable =
         totalStockLike -
@@ -770,7 +770,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       const stats = {
         stock: 0,
         smartCut: 0,
-        printLab: 0,
+        printlab: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -798,7 +798,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           const estCompleted = sourceOrder?.estimatedCompletedDate;
           const estTransit = sourceOrder?.estimatedTransitDate;
 
-          const isStockLike = ["stock", "smartCut", "printLab"].includes(wType);
+          const isStockLike = ["stock", "smartCut", "printlab"].includes(wType);
 
           if (isStockLike) {
             if (item.state === "available") {
@@ -870,7 +870,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           }
 
           // ── Sale orders: required ──
-          const isSourceStockLike = ["stock", "smartCut", "printLab"].includes(
+          const isSourceStockLike = ["stock", "smartCut", "printlab"].includes(
             order.sourceWarehouse?.type,
           );
           if (
@@ -885,7 +885,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       }
 
       // ── Derived metrics ──
-      const totalStockLike = stats.stock + stats.smartCut + stats.printLab;
+      const totalStockLike = stats.stock + stats.smartCut + stats.printlab;
       stats.available = Math.max(
         0,
         totalStockLike - stats.reserved + stats.arriving,
