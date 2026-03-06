@@ -37,5 +37,14 @@ module.exports = {
         middlewares: [],
       },
     },
+    {
+      method: "DELETE",
+      path: "/products/cut-items",
+      handler: "product.deleteAllCutItems",
+      config: {
+        policies: [],
+        middlewares: [],
+      },
+    },
   ],
 };

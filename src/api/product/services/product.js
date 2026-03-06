@@ -279,7 +279,43 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
   },
 
   /**
+   * Deletes all products of type 'cutItem'
+   * @returns {Object} Result counts
+   */
+  async deleteAllCutItems() {
+    const products = await strapi.entityService.findMany(SERVICE_UID, {
+      filters: { type: "cutItem" },
+      populate: ["orderProducts"],
+      limit: -1,
+    });
+
+    let deleted = 0;
+    let failed = 0;
+
+    for (const product of products) {
+      try {
+        if (product.orderProducts && product.orderProducts.length > 0) {
+          failed++;
+          continue;
+        }
+        await strapi.entityService.delete(SERVICE_UID, product.id);
+        deleted++;
+      } catch (error) {
+        strapi.log.error(`Failed to delete cutItem product ${product.id}:`, error);
+        failed++;
+      }
+    }
+
+    return {
+      deleted,
+      failed,
+      total: products.length,
+    };
+  },
+
+  /**
    * Obtiene products con inventario calculado
+
    * @param {Object} params - Query params de Strapi
    * @returns {Object} - Resultados paginados con inventario
    */

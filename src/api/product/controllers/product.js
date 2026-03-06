@@ -221,8 +221,32 @@ module.exports = createCoreController("api::product.product", ({ strapi }) => ({
       });
     }
   },
+
+  async deleteAllCutItems(ctx) {
+    try {
+      const productService = strapi.service("api::product.product");
+      const result = await productService.deleteAllCutItems();
+
+      return {
+        data: result,
+      };
+    } catch (error) {
+      logger.error("Error deleting cutItems:", error);
+
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "ProductDeleteAllCutItemsError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
   /**
    * Obtiene los items de un producto con sus movimientos e historial
+
    * GET /api/products/:productId/items
    */
   async getItems(ctx) {
