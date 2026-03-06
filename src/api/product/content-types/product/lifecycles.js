@@ -452,6 +452,8 @@ module.exports = {
         },
       );
 
+      if (!fullProduct) return;
+
       await syncCutProduct(fullProduct, result.id);
 
       if (process.env.NODE_ENV !== "production") {
@@ -464,7 +466,7 @@ module.exports = {
       const productService = strapi.service("api::siigo.product");
 
       // Si tiene siigoId, actualizamos en Siigo
-      if (result.siigoId) {
+      if (fullProduct.siigoId) {
         await productService.updateInSiigo(result.id);
       } else {
         // Si no tiene siigoId, intentamos crearlo
