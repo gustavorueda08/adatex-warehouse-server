@@ -36,6 +36,53 @@ module.exports = ({ strapi }) => ({
       const authService = strapi.service("api::siigo.auth");
       const mapperService = strapi.service("api::siigo.mapper");
 
+      // ========== AUTO-SYNC PRODUCTOS CON SIIGO ==========
+      if (order.orderProducts && order.orderProducts.length > 0) {
+        const siigoProductService = strapi.service("api::siigo.product");
+        for (const op of order.orderProducts) {
+          if (op.product && !op.product.siigoId) {
+            console.log(
+              `Auto-sincronizando producto ${op.product.code || op.product.name} con Siigo antes de facturar...`,
+            );
+            try {
+              let siigoProduct = null;
+              if (op.product.code) {
+                siigoProduct = await siigoProductService.searchInSiigoByCode(
+                  op.product.code,
+                );
+              }
+
+              if (siigoProduct) {
+                await strapi.db.query("api::product.product").update({
+                  where: { id: op.product.id },
+                  data: { siigoId: String(siigoProduct.id) },
+                });
+                // Actualizar en el objeto de memoria para que pase la validación
+                op.product.siigoId = String(siigoProduct.id);
+                console.log(
+                  `✓ Producto enlazado con Siigo existente: ${siigoProduct.id}`,
+                );
+              } else {
+                const syncResult = await siigoProductService.syncToSiigo(
+                  op.product.id,
+                );
+                // Actualizar en el objeto de memoria para que pase la validación
+                op.product.siigoId = syncResult.siigoId;
+                console.log(
+                  `✓ Producto creado en Siigo: ${syncResult.siigoId}`,
+                );
+              }
+            } catch (syncError) {
+              console.error(
+                `Error auto-sincronizando producto ${op.product.code}:`,
+                syncError.message,
+              );
+              // Continuamos, la validación fallará y reportará el error adecuadamente
+            }
+          }
+        }
+      }
+
       const validation = await mapperService.validateOrderForInvoicing(order);
       if (!validation.valid) {
         throw new Error(
