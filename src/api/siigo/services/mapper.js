@@ -326,8 +326,14 @@ module.exports = ({ strapi }) => ({
       if (quantityToInvoice <= 0) {
         continue; // Saltar productos con cantidad 0
       }
+      
       // Calcular precio base (sin IVA si viene incluido)
       let basePrice = parseFloat(orderProduct.price);
+      if (isNaN(basePrice) || basePrice <= 0) {
+        console.log(`Saltando producto ${product.code} por ser regalo (precio 0 o inválido).`);
+        continue; // Saltar productos que son regalos o no tienen precio
+      }
+      
       const originalPrice = basePrice;
       let taxedPrice = undefined;
 

@@ -419,9 +419,10 @@ const updateOrderProducts = async (
 
       if (newItemData.warehouse) {
         // Si viene warehouse explícitamente en el item request, validar que existe
+        const destinationWarehouseId = newItemData.warehouse?.id || newItemData.warehouse;
         const destinationWarehouse = await strapi.entityService.findOne(
           WAREHOUSE_SERVICE,
-          newItemData.warehouse,
+          destinationWarehouseId,
           { transacting: trx },
         );
 
