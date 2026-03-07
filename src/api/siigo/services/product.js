@@ -124,8 +124,9 @@ module.exports = ({ strapi }) => ({
       let hasMore = true;
 
       while (hasMore) {
+        const url = `${apiUrl}/v1/products?code=${encodeURIComponent(sanitizedCode)}&page=${page}&page_size=${pageSize}`;
         const response = await authService.authenticatedFetch(
-          `${apiUrl}/v1/products?page=${page}&page_size=${pageSize}`,
+          url,
           {
             method: "GET",
           },
@@ -142,14 +143,14 @@ module.exports = ({ strapi }) => ({
 
         if (Array.isArray(products) && products.length > 0) {
           const found = products.find(
-            (product) => String(product.code) === String(code),
+            (product) => String(product.code) === String(sanitizedCode) || String(product.code) === String(code),
           );
 
           if (found) {
             console.log(`Product encontrado en Siigo con ID: ${found.id}`);
             return found;
           }
-        } else if (products && products.code === code) {
+        } else if (products && (products.code === sanitizedCode || products.code === code)) {
           console.log(`Product encontrado en Siigo con ID: ${products.id}`);
           return products;
         }
