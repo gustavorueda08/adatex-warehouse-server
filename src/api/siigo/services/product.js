@@ -141,6 +141,8 @@ module.exports = ({ strapi }) => ({
         const data = await response.json();
         const products = data.results || data;
 
+        console.log(`[Siigo Search Debug] Result for ${sanitizedCode}:`, JSON.stringify(data, null, 2));
+
         if (Array.isArray(products) && products.length > 0) {
           const found = products.find(
             (product) => String(product.code) === String(sanitizedCode) || String(product.code) === String(code),
