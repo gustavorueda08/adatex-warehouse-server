@@ -471,6 +471,12 @@ function splitOrderProductsForDualInvoices(order) {
 
   // Procesar cada orderProduct
   for (const orderProduct of orderProducts) {
+    // Ignorar productos que son regalos (sin precio o precio 0)
+    let basePrice = parseFloat(orderProduct.price);
+    if (isNaN(basePrice) || basePrice <= 0) {
+      continue;
+    }
+
     const invoicePercentage =
       typeof orderProduct.invoicePercentage === "number"
         ? orderProduct.invoicePercentage

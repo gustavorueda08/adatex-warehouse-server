@@ -40,6 +40,12 @@ module.exports = ({ strapi }) => ({
       if (order.orderProducts && order.orderProducts.length > 0) {
         const siigoProductService = strapi.service("api::siigo.product");
         for (const op of order.orderProducts) {
+          // Ignorar productos que son regalos (sin precio o precio 0)
+          let basePrice = parseFloat(op.price);
+          if (isNaN(basePrice) || basePrice <= 0) {
+            continue;
+          }
+
           if (op.product && !op.product.siigoId) {
             console.log(
               `Auto-sincronizando producto ${op.product.code || op.product.name} con Siigo antes de facturar...`,

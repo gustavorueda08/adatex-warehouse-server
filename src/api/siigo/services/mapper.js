@@ -632,7 +632,16 @@ module.exports = ({ strapi }) => ({
     if (!order.orderProducts || order.orderProducts.length === 0) {
       errors.push("La orden no tiene productos");
     } else {
+      let validProductCount = 0;
       for (const op of order.orderProducts) {
+        // Ignorar productos que son regalos (sin precio o precio 0)
+        let basePrice = parseFloat(op.price);
+        if (isNaN(basePrice) || basePrice <= 0) {
+          continue;
+        }
+
+        validProductCount++;
+
         if (!op.product) {
           errors.push(`OrderProduct ID ${op.id} no tiene producto asociado`);
         } else if (!op.product.siigoId) {
@@ -640,6 +649,10 @@ module.exports = ({ strapi }) => ({
             `Producto ${op.product.name} no está sincronizado con Siigo`,
           );
         }
+      }
+
+      if (validProductCount === 0) {
+        errors.push("La orden no tiene productos válidos para facturar (todos son regalos)");
       }
     }
 
