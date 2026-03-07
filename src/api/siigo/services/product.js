@@ -144,17 +144,41 @@ module.exports = ({ strapi }) => ({
         console.log(`[Siigo Search Debug] Result for ${sanitizedCode}:`, JSON.stringify(data, null, 2));
 
         if (Array.isArray(products) && products.length > 0) {
-          const found = products.find(
-            (product) => String(product.code) === String(sanitizedCode) || String(product.code) === String(code),
-          );
+          const found = products.find((product) => {
+            const siigoCodeRaw = String(product.code || "");
+            const siigoCodeSanitized = siigoCodeRaw
+              .toUpperCase()
+              .trim()
+              .replace(/[\s]+/g, "-")
+              .replace(/[^\w-]/g, "");
+
+            return (
+              siigoCodeSanitized === sanitizedCode ||
+              siigoCodeRaw === String(code || "") ||
+              siigoCodeRaw.toUpperCase() === String(code || "").toUpperCase()
+            );
+          });
 
           if (found) {
             console.log(`Product encontrado en Siigo con ID: ${found.id}`);
             return found;
           }
-        } else if (products && (products.code === sanitizedCode || products.code === code)) {
-          console.log(`Product encontrado en Siigo con ID: ${products.id}`);
-          return products;
+        } else if (products && products.code != null) {
+          const siigoCodeRaw = String(products.code || "");
+          const siigoCodeSanitized = siigoCodeRaw
+            .toUpperCase()
+            .trim()
+            .replace(/[\s]+/g, "-")
+            .replace(/[^\w-]/g, "");
+
+          if (
+            siigoCodeSanitized === sanitizedCode ||
+            siigoCodeRaw === String(code || "") ||
+            siigoCodeRaw.toUpperCase() === String(code || "").toUpperCase()
+          ) {
+            console.log(`Product encontrado en Siigo con ID: ${products.id}`);
+            return products;
+          }
         }
 
         const pagination = data.pagination || {};
