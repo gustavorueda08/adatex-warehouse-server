@@ -597,23 +597,30 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         let orderProduct;
         if (!orderProductData) {
           let price = 0;
-          let ivaIncluded = true;
+          let ivaIncluded = false;
           let invoicePercentage = 100;
-          
-          const customerToUse = currentOrder.customerForInvoice || currentOrder.customer;
+
+          const customerToUse =
+            currentOrder.customer || currentOrder.customerForInvoice;
           if (customerToUse && customerToUse.prices) {
             const specificPrice = customerToUse.prices.find((p) => {
               const pId = p.product?.id || p.product;
               return String(pId) === String(product.id);
             });
-            
+
             if (specificPrice) {
-              price = specificPrice.unitPrice !== undefined ? specificPrice.unitPrice : 0;
+              price =
+                specificPrice.unitPrice !== undefined
+                  ? specificPrice.unitPrice
+                  : 0;
               if (specificPrice.ivaIncluded !== undefined) {
                 ivaIncluded = specificPrice.ivaIncluded;
               }
-              if (specificPrice.invoicePercentage !== undefined && specificPrice.invoicePercentage !== null) {
-                 invoicePercentage = specificPrice.invoicePercentage;
+              if (
+                specificPrice.invoicePercentage !== undefined &&
+                specificPrice.invoicePercentage !== null
+              ) {
+                invoicePercentage = specificPrice.invoicePercentage;
               }
             }
           }
