@@ -546,6 +546,12 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "orderProducts.product",
               "sourceWarehouse",
               "destinationWarehouse",
+              "customerForInvoice",
+              "customerForInvoice.prices",
+              "customerForInvoice.prices.product",
+              "customer",
+              "customer.prices",
+              "customer.prices.product",
             ],
             transacting: trx,
           },
@@ -590,6 +596,28 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         let orderProduct;
         if (!orderProductData) {
+          let price = 0;
+          let ivaIncluded = true;
+          let invoicePercentage = 100;
+          
+          const customerToUse = currentOrder.customerForInvoice || currentOrder.customer;
+          if (customerToUse && customerToUse.prices) {
+            const specificPrice = customerToUse.prices.find((p) => {
+              const pId = p.product?.id || p.product;
+              return String(pId) === String(product.id);
+            });
+            
+            if (specificPrice) {
+              price = specificPrice.unitPrice !== undefined ? specificPrice.unitPrice : 0;
+              if (specificPrice.ivaIncluded !== undefined) {
+                ivaIncluded = specificPrice.ivaIncluded;
+              }
+              if (specificPrice.invoicePercentage !== undefined && specificPrice.invoicePercentage !== null) {
+                 invoicePercentage = specificPrice.invoicePercentage;
+              }
+            }
+          }
+
           // Crear OrderProduct
           orderProduct = await orderProductService.create({
             product: product.id,
@@ -597,6 +625,9 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             requestedQuantity: 0,
             requestedPackages: 0,
             notes: "Producto agregado dinámicamente",
+            price,
+            ivaIncluded,
+            invoicePercentage,
             trx,
           });
         } else {

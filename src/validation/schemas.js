@@ -213,7 +213,7 @@ const CreateOrderSchema = z
             .optional()
             .default(null),
           name: z.string().optional().default(null),
-        }),
+        }).catchall(z.any()),
       )
       .optional()
       .default([]),
