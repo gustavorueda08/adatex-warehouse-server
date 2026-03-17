@@ -601,6 +601,10 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         }
       }
 
+      // --- Calculate 3-month average FIRST (needed for fallback projection) ---
+      const total90Days = monthlyVolume + month2Volume + month3Volume;
+      const threeMonthAverage = total90Days / 3;
+
       // --- Seasonal Projection ---
       let trendGrowthRate = 0;
       if (historical90Volume > 0) {
@@ -625,16 +629,14 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         // Blend: the deeper we are in the month, the more we trust actual data
         const monthProgress = currentDayOfMonth / daysInMonth;
         projectedVolume = (linearPace * monthProgress) + (expectedFromHistory * (1 - monthProgress));
-      } else {
-        // Fallback: pure linear projection
-        if (currentDayOfMonth > 0) {
-          projectedVolume = (currentMonthVolume / currentDayOfMonth) * daysInMonth;
-        }
+      } else if (currentMonthVolume > 0 && currentDayOfMonth > 0) {
+        // No historical base but customer has bought this month → linear projection
+        projectedVolume = (currentMonthVolume / currentDayOfMonth) * daysInMonth;
+      } else if (threeMonthAverage > 0) {
+        // No historical base, no current-month sales, but has recent 90-day activity
+        // Use their average monthly consumption as the projection
+        projectedVolume = threeMonthAverage;
       }
-
-      // --- Existing metrics ---
-      const total90Days = monthlyVolume + month2Volume + month3Volume;
-      const threeMonthAverage = total90Days / 3;
 
       let isChurnRisk = false;
       if (threeMonthAverage > 0 && monthlyVolume < (threeMonthAverage * (1 - churnThreshold))) {
