@@ -32,7 +32,7 @@ module.exports = {
 
   async afterCreate(event) {
     try {
-      const { result } = event;
+      const { result, params } = event;
       const customerSiigoService = strapi.service("api::siigo.customer");
 
       // Si ya tiene siigoId (e.g. creado desde sync), no hacemos nada
@@ -41,7 +41,7 @@ module.exports = {
       }
 
       // Intentar buscar en Siigo por identificación primero
-      if (result.identification) {
+      if (result.identification && !params.data?.skipSiigoSync) {
         const existingSiigoCustomer =
           await customerSiigoService.searchInSiigoByIdentification(
             result.identification
@@ -61,7 +61,9 @@ module.exports = {
       }
 
       // Si no existe, lo creamos en Siigo
-      await customerSiigoService.createInSiigo(result.id);
+      if (!params.data?.skipSiigoSync) {
+        await customerSiigoService.createInSiigo(result.id);
+      }
     } catch (error) {
       console.error(
         "[Customer Lifecycle] Error en afterCreate:",
@@ -72,8 +74,13 @@ module.exports = {
 
   async afterUpdate(event) {
     try {
-      const { result } = event;
+      const { result, params } = event;
       const customerSiigoService = strapi.service("api::siigo.customer");
+
+      if (params.data?.skipSiigoSync) {
+        console.log(`[Customer Lifecycle] Siigo Sync Skipped for ${result.id}`);
+        return;
+      }
 
       // Si tiene siigoId, actualizamos en Siigo
       if (result.siigoId) {

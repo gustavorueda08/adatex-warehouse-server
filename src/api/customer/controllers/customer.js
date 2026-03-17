@@ -221,5 +221,15 @@ module.exports = createCoreController(
         });
       }
     },
+    async triggerAnalytics(ctx) {
+      try {
+        console.log("Analytics manual trigger requested");
+        await strapi.service("api::customer.customer").calculateAnalytics();
+        return { success: true };
+      } catch (err) {
+        console.error(err);
+        return ctx.internalServerError(err.message);
+      }
+    }
   }),
 );

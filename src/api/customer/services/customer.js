@@ -483,7 +483,11 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
           customer: customer.id,
           type: { $in: [ORDER_TYPES.SALE, ORDER_TYPES.PARTIAL_INVOICE] },
           state: { $in: [ORDER_STATES.COMPLETED, ORDER_STATES.PROCESSING] },
-          createdAt: { $gte: ninetyDaysAgo.toDate() }
+          $or: [
+            { createdDate: { $gte: ninetyDaysAgo.toDate() } },
+            { createdAt: { $gte: ninetyDaysAgo.toDate() } },
+            { completedDate: { $gte: ninetyDaysAgo.toDate() } }
+          ]
         },
         populate: ["orderProducts", "orderProducts.product"]
       });
@@ -495,7 +499,8 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
       let productStats = {}; // { productId: { name, quantity, volume } }
 
       for (const order of orders) {
-        const orderDate = moment(order.createdAt);
+        const dateInput = order.createdDate || order.completedDate || order.createdAt;
+        const orderDate = moment(dateInput);
         if (!lastPurchaseDate || orderDate.isAfter(lastPurchaseDate)) {
           lastPurchaseDate = orderDate.toDate();
         }
@@ -566,8 +571,12 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
          updateData.status = 'active';
       }
 
-      await strapi.entityService.update("api::customer.customer", customer.id, {
-        data: updateData
+      await strapi.db.query("api::customer.customer").update({
+        where: { id: customer.id },
+        data: {
+          ...updateData,
+          skipSiigoSync: true
+        }
       });
     }
   },
