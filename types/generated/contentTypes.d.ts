@@ -506,6 +506,8 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     creditLimit: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     creditUsed: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    currentMonthVolume: Schema.Attribute.Decimal &
+      Schema.Attribute.DefaultTo<0>;
     email: Schema.Attribute.String & Schema.Attribute.Required;
     identification: Schema.Attribute.UID & Schema.Attribute.Required;
     identificationType: Schema.Attribute.Enumeration<['CC', 'NIT']>;
@@ -534,6 +536,7 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     paymentTerms: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
     phone: Schema.Attribute.String;
     prices: Schema.Attribute.Relation<'oneToMany', 'api::price.price'>;
+    projectedVolume: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     prospectNotes: Schema.Attribute.Text;
     publishedAt: Schema.Attribute.DateTime;
     seller: Schema.Attribute.Relation<'manyToOne', 'api::seller.seller'>;

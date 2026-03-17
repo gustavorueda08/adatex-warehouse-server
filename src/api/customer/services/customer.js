@@ -460,7 +460,8 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
   },
 
   /**
-   * Calculates monthly volume, moving averages and churn risk for all customers.
+   * Calculates monthly volume, moving averages, churn risk,
+   * current-month volume, and seasonal projected volume for all customers.
    */
   async calculateAnalytics() {
     const moment = require("moment-timezone");
@@ -469,8 +470,18 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
     const ORDER_STATES = require("../../../utils/orderStates");
     
     const churnThreshold = 0.5; // 50% drop signifies churn risk
-    
+
+    // Date boundaries
+    const now = moment();
     const ninetyDaysAgo = moment().subtract(90, 'days').startOf('day');
+    const startOfCurrentMonth = moment().startOf('month');
+    const currentDayOfMonth = now.date();
+    const daysInMonth = now.daysInMonth();
+
+    // Historical boundaries for seasonal model
+    const startOfSameMonthLastYear = moment().subtract(1, 'year').startOf('month');
+    const endOfSameMonthLastYear = moment().subtract(1, 'year').endOf('month');
+    const historical90Start = moment(startOfSameMonthLastYear).subtract(90, 'days').startOf('day');
 
     const customers = await strapi.entityService.findMany("api::customer.customer", {
       fields: ["id", "status"],
@@ -478,7 +489,8 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
     });
 
     for (const customer of customers) {
-      const orders = await strapi.entityService.findMany(ORDER_SERVICE, {
+      // --- Fetch RECENT orders (last 90 days) ---
+      const recentOrders = await strapi.entityService.findMany(ORDER_SERVICE, {
         filters: {
           customer: customer.id,
           type: { $in: [ORDER_TYPES.SALE, ORDER_TYPES.PARTIAL_INVOICE] },
@@ -492,13 +504,32 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         populate: ["orderProducts", "orderProducts.product"]
       });
 
-      let monthlyVolume = 0;
-      let month2Volume = 0;
-      let month3Volume = 0;
-      let lastPurchaseDate = null;
-      let productStats = {}; // { productId: { name, quantity, volume } }
+      // --- Fetch HISTORICAL orders (same month last year + 90 days prior) ---
+      const historicalOrders = await strapi.entityService.findMany(ORDER_SERVICE, {
+        filters: {
+          customer: customer.id,
+          type: { $in: [ORDER_TYPES.SALE, ORDER_TYPES.PARTIAL_INVOICE] },
+          state: { $in: [ORDER_STATES.COMPLETED, ORDER_STATES.PROCESSING] },
+          $or: [
+            { createdDate: { $gte: historical90Start.toDate(), $lte: endOfSameMonthLastYear.toDate() } },
+            { createdAt: { $gte: historical90Start.toDate(), $lte: endOfSameMonthLastYear.toDate() } },
+            { completedDate: { $gte: historical90Start.toDate(), $lte: endOfSameMonthLastYear.toDate() } }
+          ]
+        },
+        populate: ["orderProducts", "orderProducts.product"]
+      });
 
-      for (const order of orders) {
+      let monthlyVolume = 0;       // last 30 days
+      let month2Volume = 0;        // 31-60 days ago
+      let month3Volume = 0;        // 61-90 days ago
+      let currentMonthVolume = 0;  // since 1st of current month
+      let lastPurchaseDate = null;
+      let productStats = {};
+
+      // Recent 90 day totals
+      let recent90Volume = 0;
+
+      for (const order of recentOrders) {
         const dateInput = order.createdDate || order.completedDate || order.createdAt;
         const orderDate = moment(dateInput);
         if (!lastPurchaseDate || orderDate.isAfter(lastPurchaseDate)) {
@@ -529,6 +560,7 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
           }
         }
 
+        // Bucket into 30-day periods
         const daysAgo = moment().diff(orderDate, 'days');
         if (daysAgo <= 30) {
           monthlyVolume += orderTotal;
@@ -537,8 +569,70 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         } else {
           month3Volume += orderTotal;
         }
+
+        // Current calendar month total
+        if (orderDate.isSameOrAfter(startOfCurrentMonth)) {
+          currentMonthVolume += orderTotal;
+        }
+
+        recent90Volume += orderTotal;
       }
 
+      // --- Historical aggregation ---
+      let historicalSameMonthVolume = 0;
+      let historical90Volume = 0;
+
+      for (const order of historicalOrders) {
+        const dateInput = order.createdDate || order.completedDate || order.createdAt;
+        const orderDate = moment(dateInput);
+
+        let orderTotal = 0;
+        for (const op of order.orderProducts || []) {
+          const qty = op.requestedQuantity || 0;
+          const price = op.price || 0;
+          orderTotal += (qty * price);
+        }
+
+        if (orderDate.isBetween(startOfSameMonthLastYear, endOfSameMonthLastYear, null, '[]')) {
+          historicalSameMonthVolume += orderTotal;
+        }
+        if (orderDate.isBetween(historical90Start, startOfSameMonthLastYear, null, '[)')) {
+          historical90Volume += orderTotal;
+        }
+      }
+
+      // --- Seasonal Projection ---
+      let trendGrowthRate = 0;
+      if (historical90Volume > 0) {
+        trendGrowthRate = (recent90Volume - historical90Volume) / historical90Volume;
+        // Cap extreme trends to avoid unrealistic projections
+        if (trendGrowthRate > 3) trendGrowthRate = 3;       // max +300%
+        if (trendGrowthRate < -0.8) trendGrowthRate = -0.8;  // max -80%
+      }
+
+      let projectedVolume = 0;
+
+      if (historicalSameMonthVolume > 0) {
+        // Seasonal model: history-based adjusted by trend
+        const expectedFromHistory = historicalSameMonthVolume * (1 + trendGrowthRate);
+
+        // Linear pace from what we've sold so far this month
+        let linearPace = 0;
+        if (currentDayOfMonth > 0) {
+          linearPace = (currentMonthVolume / currentDayOfMonth) * daysInMonth;
+        }
+
+        // Blend: the deeper we are in the month, the more we trust actual data
+        const monthProgress = currentDayOfMonth / daysInMonth;
+        projectedVolume = (linearPace * monthProgress) + (expectedFromHistory * (1 - monthProgress));
+      } else {
+        // Fallback: pure linear projection
+        if (currentDayOfMonth > 0) {
+          projectedVolume = (currentMonthVolume / currentDayOfMonth) * daysInMonth;
+        }
+      }
+
+      // --- Existing metrics ---
       const total90Days = monthlyVolume + month2Volume + month3Volume;
       const threeMonthAverage = total90Days / 3;
 
@@ -547,7 +641,6 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         isChurnRisk = true;
       }
 
-      // Sort products by volume descending and take top 5
       const topProducts = Object.values(productStats)
         .sort((a, b) => b.volume - a.volume)
         .slice(0, 5);
@@ -556,7 +649,9 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         monthlyVolume,
         threeMonthAverage,
         isChurnRisk,
-        topProducts
+        topProducts,
+        currentMonthVolume,
+        projectedVolume: Math.round(projectedVolume),
       };
       
       if (lastPurchaseDate) {

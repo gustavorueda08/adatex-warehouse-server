@@ -158,6 +158,14 @@
     },
     "topProducts": {
       "type": "json"
+    },
+    "currentMonthVolume": {
+      "type": "decimal",
+      "default": 0
+    },
+    "projectedVolume": {
+      "type": "decimal",
+      "default": 0
     }
   }
 }
