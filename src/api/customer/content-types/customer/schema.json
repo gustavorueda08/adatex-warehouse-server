@@ -129,6 +129,35 @@
     },
     "companyName": {
       "type": "string"
+    },
+    "inactivityReason": {
+      "type": "text"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["active", "at_risk", "churned", "prospect"],
+      "default": "active"
+    },
+    "lastPurchaseDate": {
+      "type": "datetime"
+    },
+    "monthlyVolume": {
+      "type": "decimal",
+      "default": 0
+    },
+    "threeMonthAverage": {
+      "type": "decimal",
+      "default": 0
+    },
+    "isChurnRisk": {
+      "type": "boolean",
+      "default": false
+    },
+    "prospectNotes": {
+      "type": "text"
+    },
+    "topProducts": {
+      "type": "json"
     }
   }
 }

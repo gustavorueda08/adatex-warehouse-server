@@ -509,13 +509,16 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     email: Schema.Attribute.String & Schema.Attribute.Required;
     identification: Schema.Attribute.UID & Schema.Attribute.Required;
     identificationType: Schema.Attribute.Enumeration<['CC', 'NIT']>;
+    inactivityReason: Schema.Attribute.Text;
     invoiceOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
     invoices: Schema.Attribute.Relation<'oneToMany', 'api::invoice.invoice'>;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     isBlocked: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    isChurnRisk: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     isCompany: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     isDefault: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     lastName: Schema.Attribute.String;
+    lastPurchaseDate: Schema.Attribute.DateTime;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -523,6 +526,7 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     mainParty: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
+    monthlyVolume: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     notes: Schema.Attribute.Text;
     orders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
@@ -530,14 +534,21 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
     paymentTerms: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<0>;
     phone: Schema.Attribute.String;
     prices: Schema.Attribute.Relation<'oneToMany', 'api::price.price'>;
+    prospectNotes: Schema.Attribute.Text;
     publishedAt: Schema.Attribute.DateTime;
     seller: Schema.Attribute.Relation<'manyToOne', 'api::seller.seller'>;
     siigoId: Schema.Attribute.UID;
+    status: Schema.Attribute.Enumeration<
+      ['active', 'at_risk', 'churned', 'prospect']
+    > &
+      Schema.Attribute.DefaultTo<'active'>;
     taxes: Schema.Attribute.Relation<'manyToMany', 'api::tax.tax'>;
     territory: Schema.Attribute.Relation<
       'manyToOne',
       'api::territory.territory'
     >;
+    threeMonthAverage: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    topProducts: Schema.Attribute.JSON;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

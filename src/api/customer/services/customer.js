@@ -459,6 +459,119 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
     return Object.values(productMap).filter((group) => group.items.length > 0);
   },
 
+  /**
+   * Calculates monthly volume, moving averages and churn risk for all customers.
+   */
+  async calculateAnalytics() {
+    const moment = require("moment-timezone");
+    const { ORDER_SERVICE } = require("../../../utils/services");
+    const ORDER_TYPES = require("../../../utils/orderTypes");
+    const ORDER_STATES = require("../../../utils/orderStates");
+    
+    const churnThreshold = 0.5; // 50% drop signifies churn risk
+    
+    const ninetyDaysAgo = moment().subtract(90, 'days').startOf('day');
+
+    const customers = await strapi.entityService.findMany("api::customer.customer", {
+      fields: ["id", "status"],
+      limit: -1,
+    });
+
+    for (const customer of customers) {
+      const orders = await strapi.entityService.findMany(ORDER_SERVICE, {
+        filters: {
+          customer: customer.id,
+          type: { $in: [ORDER_TYPES.SALE, ORDER_TYPES.PARTIAL_INVOICE] },
+          state: { $in: [ORDER_STATES.COMPLETED, ORDER_STATES.PROCESSING] },
+          createdAt: { $gte: ninetyDaysAgo.toDate() }
+        },
+        populate: ["orderProducts", "orderProducts.product"]
+      });
+
+      let monthlyVolume = 0;
+      let month2Volume = 0;
+      let month3Volume = 0;
+      let lastPurchaseDate = null;
+      let productStats = {}; // { productId: { name, quantity, volume } }
+
+      for (const order of orders) {
+        const orderDate = moment(order.createdAt);
+        if (!lastPurchaseDate || orderDate.isAfter(lastPurchaseDate)) {
+          lastPurchaseDate = orderDate.toDate();
+        }
+
+        let orderTotal = 0;
+        for (const op of order.orderProducts || []) {
+          const qty = op.requestedQuantity || 0;
+          const price = op.price || 0;
+          const lineTotal = (qty * price);
+          orderTotal += lineTotal;
+
+          if (op.product) {
+            const pId = op.product.id;
+            if (!productStats[pId]) {
+              productStats[pId] = {
+                id: pId,
+                name: op.product.name,
+                code: op.product.code,
+                unit: op.product.unit,
+                quantity: 0,
+                volume: 0
+              };
+            }
+            productStats[pId].quantity += qty;
+            productStats[pId].volume += lineTotal;
+          }
+        }
+
+        const daysAgo = moment().diff(orderDate, 'days');
+        if (daysAgo <= 30) {
+          monthlyVolume += orderTotal;
+        } else if (daysAgo <= 60) {
+          month2Volume += orderTotal;
+        } else {
+          month3Volume += orderTotal;
+        }
+      }
+
+      const total90Days = monthlyVolume + month2Volume + month3Volume;
+      const threeMonthAverage = total90Days / 3;
+
+      let isChurnRisk = false;
+      if (threeMonthAverage > 0 && monthlyVolume < (threeMonthAverage * (1 - churnThreshold))) {
+        isChurnRisk = true;
+      }
+
+      // Sort products by volume descending and take top 5
+      const topProducts = Object.values(productStats)
+        .sort((a, b) => b.volume - a.volume)
+        .slice(0, 5);
+
+      const updateData = {
+        monthlyVolume,
+        threeMonthAverage,
+        isChurnRisk,
+        topProducts
+      };
+      
+      if (lastPurchaseDate) {
+        updateData.lastPurchaseDate = lastPurchaseDate;
+      }
+
+      if (customer.status === 'active' && isChurnRisk) {
+         updateData.status = 'at_risk';
+      } else if (customer.status === 'active' && monthlyVolume === 0 && threeMonthAverage > 0) {
+         updateData.status = 'churned'; 
+      } else if (monthlyVolume > 0 && (customer.status === 'at_risk' || customer.status === 'churned')) {
+         updateData.status = 'active';
+      }
+
+      await strapi.entityService.update("api::customer.customer", customer.id, {
+        data: updateData
+      });
+    }
+  },
+
   async delete(id) {
     const deletedCustomer = await strapi.entityService.delete(
       CUSTOMER_SERVICE,
