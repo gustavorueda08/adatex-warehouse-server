@@ -139,8 +139,17 @@ module.exports = ({ strapi }) => ({
     );
 
     if (!resp.ok) {
-      const err = await resp.text();
-      throw new Error(`Siigo balance report error ${resp.status}: ${err}`);
+      const errText = await resp.text();
+      // Cliente inactivo en Siigo → sin movimientos contables, devolver vacío
+      try {
+        const errJson = JSON.parse(errText);
+        const isInactive = errJson?.errors?.some((e) => e.code === "parameter_inactive");
+        if (isInactive) {
+          logger.debug(`[AR] Cliente ${identification} inactivo en Siigo — balance vacío`);
+          return [];
+        }
+      } catch { /* no era JSON válido */ }
+      throw new Error(`Siigo balance report error ${resp.status}: ${errText}`);
     }
 
     const { file_url } = await resp.json();

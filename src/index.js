@@ -77,5 +77,26 @@ module.exports = {
         strapi.log.info(`Socket disconnected: user=${userId}`);
       });
     });
+
+    // ── Cron inicial al arrancar ─────────────────────────────────────────────
+    // Los crons solo corren a su hora programada; en el primer arranque los datos
+    // estarían vacíos. Corremos analytics y forecast en background, sin bloquear.
+    setImmediate(async () => {
+      try {
+        strapi.log.info("[bootstrap] Iniciando calculateAnalytics...");
+        await strapi.service("api::customer.customer").calculateAnalytics();
+        strapi.log.info("[bootstrap] calculateAnalytics completado.");
+      } catch (err) {
+        strapi.log.error("[bootstrap] Error en calculateAnalytics:", err.message);
+      }
+
+      try {
+        strapi.log.info("[bootstrap] Iniciando calculateForecasts...");
+        await strapi.service("api::demand-forecast.demand-forecast").calculateForecasts();
+        strapi.log.info("[bootstrap] calculateForecasts completado.");
+      } catch (err) {
+        strapi.log.error("[bootstrap] Error en calculateForecasts:", err.message);
+      }
+    });
   },
 };
