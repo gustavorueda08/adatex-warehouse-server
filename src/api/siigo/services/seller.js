@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const { siigoFetch } = require("../utils/siigoFetch");
 
 /**
@@ -14,12 +15,12 @@ module.exports = ({ strapi }) => ({
    */
   async listFromSiigo() {
     try {
-      console.log("Listando sellers desde Siigo...");
+      logger.info("Listando sellers desde Siigo...");
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando listado de sellers desde Siigo");
+        logger.info("[TEST MODE] Simulando listado de sellers desde Siigo");
         return [
           {
             id: 629,
@@ -57,7 +58,7 @@ module.exports = ({ strapi }) => ({
       }
 
       const sellers = await response.json();
-      console.log(`${sellers.length} sellers obtenidos desde Siigo`);
+      logger.info(`${sellers.length} sellers obtenidos desde Siigo`);
 
       return sellers;
     } catch (error) {
@@ -73,12 +74,12 @@ module.exports = ({ strapi }) => ({
    */
   async getFromSiigo(sellerId) {
     try {
-      console.log(`Obteniendo seller ${sellerId} desde Siigo...`);
+      logger.info(`Obteniendo seller ${sellerId} desde Siigo...`);
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando consulta de seller desde Siigo");
+        logger.info("[TEST MODE] Simulando consulta de seller desde Siigo");
         return {
           id: sellerId,
           identification: "12345678",
@@ -106,7 +107,7 @@ module.exports = ({ strapi }) => ({
       }
 
       const seller = await response.json();
-      console.log(`Seller ${sellerId} obtenido desde Siigo`);
+      logger.info(`Seller ${sellerId} obtenido desde Siigo`);
 
       return seller;
     } catch (error) {
@@ -125,7 +126,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllToLocal() {
     try {
-      console.log(
+      logger.info(
         "Iniciando sincronización de sellers desde Siigo a users locales..."
       );
 
@@ -184,7 +185,7 @@ module.exports = ({ strapi }) => ({
                 { data: userData }
               );
               updated++;
-              console.log(
+              logger.info(
                 `User actualizado: ${userData.firstName} ${userData.lastName}`
               );
             } else {
@@ -210,7 +211,7 @@ module.exports = ({ strapi }) => ({
                 { data: userData }
               );
               created++;
-              console.log(
+              logger.info(
                 `User creado: ${userData.firstName} ${userData.lastName}`
               );
             } else {
@@ -238,7 +239,7 @@ module.exports = ({ strapi }) => ({
         message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Sin cambios: ${skipped}`,
       };
 
-      console.log(result.message);
+      logger.info(result.message);
       return result;
     } catch (error) {
       console.error("Error al sincronizar sellers desde Siigo:", error.message);

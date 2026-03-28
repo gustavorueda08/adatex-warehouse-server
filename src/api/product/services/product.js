@@ -354,6 +354,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stock: 0,
         smartCut: 0,
         printlab: 0,
+        freeTradeZone: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -396,6 +397,9 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
                 stats[wType] += qty;
               }
             }
+          } else if (wType === "freeTradeZone") {
+            // Zona franca items are tracked separately — NOT included in operational stock
+            stats.freeTradeZone += qty;
           } else if (wType === "production") {
             stats.production += qty;
           } else if (wType === "transit") {
@@ -610,6 +614,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stock: 0,
         smartCut: 0,
         printlab: 0,
+        freeTradeZone: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -654,6 +659,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
             stats[wType] += qty;
           }
         }
+      } else if (wType === "freeTradeZone") {
+        stats.freeTradeZone += qty;
       } else if (wType === "production") {
         stats.production += qty;
       } else if (wType === "transit") {
@@ -747,6 +754,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stock: 0,
         smartCut: 0,
         printlab: 0,
+        freeTradeZone: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -807,6 +815,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         stock: 0,
         smartCut: 0,
         printlab: 0,
+        freeTradeZone: 0,
         production: 0,
         transit: 0,
         defective: 0,
@@ -851,6 +860,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
                 stats[wType] += qty;
               }
             }
+          } else if (wType === "freeTradeZone") {
+            stats.freeTradeZone += qty;
           } else if (wType === "production") {
             if (isWithinRange(estCompleted)) {
               stats.arriving += qty;
@@ -954,7 +965,9 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
    * @returns {Object} - Resultados paginados con inventario
    */
   async findWithInventory(params = {}) {
-    // 1. Define required relations for inventory calculation
+    // 1. Define required relations for inventory calculation.
+    //    Note: item schema has no bare "order" field (only sourceOrder / orders),
+    //    so it is intentionally absent here to avoid findMany ValidationErrors.
     const inventoryPopulate = {
       items: {
         fields: ["currentQuantity", "state"],
@@ -969,9 +982,6 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
                 fields: ["type"],
               },
             },
-          },
-          order: {
-            fields: ["type"],
           },
         },
       },
@@ -1029,7 +1039,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       }
     }
 
-    // 3. Merge user params with inventory requirements
+    // 3. Extract pagination and special params
     const {
       pagination: paginationParams,
       collections,
@@ -1053,70 +1063,93 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       };
     }
 
-    const finalParams = {
-      ...otherParams,
-      page: paginationParams?.page || params.page,
-      pageSize: paginationParams?.pageSize || params.pageSize,
-      sort: params.sort || "name:asc",
-      populate: {
-        ...userPopulate,
-        ...inventoryPopulate,
-        items: {
-          ...(userPopulate.items === true ? {} : userPopulate.items || {}),
-          ...inventoryPopulate.items,
-        },
-        orderProducts: {
-          ...(userPopulate.orderProducts === true
-            ? {}
-            : userPopulate.orderProducts || {}),
-          ...inventoryPopulate.orderProducts,
-        },
-      },
-    };
+    const page = parseInt(paginationParams?.page || params.page) || 1;
+    const pageSize = parseInt(paginationParams?.pageSize || params.pageSize) || 25;
+
+    const baseFilters = { ...(otherParams.filters || {}) };
 
     if (collections) {
-      finalParams.filters = {
-        ...(finalParams.filters || {}),
-        collections: {
-          id: {
-            $in: Array.isArray(collections) ? collections : [collections],
-          },
+      baseFilters.collections = {
+        id: {
+          $in: Array.isArray(collections) ? collections : [collections],
         },
       };
     }
 
-    // 4. Fetch data using entityService to handle pagination/filters
-    const { results, pagination } = await strapi.entityService.findPage(
-      SERVICE_UID,
-      finalParams,
-    );
+    const mergedPopulate = {
+      ...userPopulate,
+      ...inventoryPopulate,
+      items: {
+        ...(userPopulate.items === true ? {} : userPopulate.items || {}),
+        ...inventoryPopulate.items,
+      },
+      orderProducts: {
+        ...(userPopulate.orderProducts === true
+          ? {}
+          : userPopulate.orderProducts || {}),
+        ...inventoryPopulate.orderProducts,
+      },
+    };
+
+    // 4. Load ALL matching products with inventory relations.
+    //    We must calculate inventory for every product before we can know which
+    //    ones have non-zero stock, so we cannot paginate at the DB level here.
+    //    For typical warehouse catalogues (< 10 000 products) this is fast.
+    const allProducts = await strapi.entityService.findMany(SERVICE_UID, {
+      ...otherParams,
+      filters: baseFilters,
+      sort: otherParams.sort || params.sort || "name:asc",
+      populate: mergedPopulate,
+    });
 
     // 5. Calculate inventory based on mode
-    let productsWithInventory;
+    let allWithInventory;
     if (date) {
-      // Historical: reconstruct via movements
-      productsWithInventory = await this.calculateHistoricalInventory(
-        results,
+      allWithInventory = await this.calculateHistoricalInventory(
+        allProducts,
         date,
       );
     } else if (fromDate && toDate) {
-      // Projection: project into future date range
-      productsWithInventory = this.calculateProjectedInventory(
-        results,
+      allWithInventory = this.calculateProjectedInventory(
+        allProducts,
         fromDate,
         toDate,
       );
     } else {
-      // Current: live snapshot
-      productsWithInventory = this.calculateInventoryForProducts(results, {
+      allWithInventory = this.calculateInventoryForProducts(allProducts, {
         userPopulate,
       });
     }
 
+    // 6. Filter out products with all-zero inventory stats
+    const nonZero = allWithInventory.filter((p) => {
+      const inv = p.inventory;
+      if (!inv) return false;
+      return (
+        (inv.stock || 0) > 0 ||
+        (inv.smartCut || 0) > 0 ||
+        (inv.printlab || 0) > 0 ||
+        (inv.freeTradeZone || 0) > 0 ||
+        (inv.production || 0) > 0 ||
+        (inv.transit || 0) > 0 ||
+        (inv.defective || 0) > 0 ||
+        (inv.reserved || 0) > 0 ||
+        (inv.required || 0) > 0 ||
+        (inv.netAvailable || 0) !== 0 ||
+        (inv.arriving || 0) > 0
+      );
+    });
+
+    // 7. Paginate the filtered results
+    const total = nonZero.length;
+    const pageCount = Math.ceil(total / pageSize) || 1;
+    const start = (page - 1) * pageSize;
+    const paginatedProducts = nonZero.slice(start, start + pageSize);
+
     return {
-      data: productsWithInventory,
+      data: paginatedProducts,
       meta: {
-        pagination,
+        pagination: { page, pageSize, pageCount, total },
       },
     };
   },
@@ -1135,9 +1168,6 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         fields: ["currentQuantity", "state"],
         populate: {
           warehouse: {
-            fields: ["type"],
-          },
-          order: {
             fields: ["type"],
           },
         },
@@ -1187,7 +1217,22 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       {},
     );
 
-    return productsWithInventory;
+    return productsWithInventory.filter((p) => {
+      const inv = p.inventory;
+      return (
+        inv.stock > 0 ||
+        inv.smartCut > 0 ||
+        inv.printlab > 0 ||
+        inv.freeTradeZone > 0 ||
+        inv.production > 0 ||
+        inv.transit > 0 ||
+        inv.defective > 0 ||
+        inv.reserved > 0 ||
+        inv.required > 0 ||
+        inv.available > 0 ||
+        inv.netAvailable !== 0
+      );
+    });
   },
 
   async bulkUpsert(products = []) {

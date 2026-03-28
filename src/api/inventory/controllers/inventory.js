@@ -17,10 +17,7 @@ module.exports = {
   async get(ctx) {
     try {
       // Safely extract type from query params
-      console.log(ctx.query);
-
       const type = ctx.query?.filters?.type?.["$eq"] || ctx.query?.filters.type;
-      console.log(type);
 
       const inventoryService = strapi.service(INVENTORY_SERVICE);
 

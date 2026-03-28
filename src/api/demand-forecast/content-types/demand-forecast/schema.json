@@ -1,0 +1,59 @@
+{
+  "kind": "collectionType",
+  "collectionName": "demand_forecasts",
+  "info": {
+    "singularName": "demand-forecast",
+    "pluralName": "demand-forecasts",
+    "displayName": "DemandForecast"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "customer": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::customer.customer"
+    },
+    "product": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::product.product"
+    },
+    "avgMonthlyQty": {
+      "type": "decimal",
+      "default": 0
+    },
+    "avgMonthlyVolume": {
+      "type": "decimal",
+      "default": 0
+    },
+    "forecastQty": {
+      "type": "decimal",
+      "default": 0
+    },
+    "forecastVolume": {
+      "type": "decimal",
+      "default": 0
+    },
+    "purchaseFrequencyDays": {
+      "type": "integer",
+      "default": 0
+    },
+    "nextExpectedPurchaseDate": {
+      "type": "date"
+    },
+    "confidence": {
+      "type": "enumeration",
+      "enum": ["high", "medium", "low"],
+      "default": "low"
+    },
+    "lastOrderDate": {
+      "type": "datetime"
+    },
+    "calculatedAt": {
+      "type": "datetime"
+    }
+  }
+}

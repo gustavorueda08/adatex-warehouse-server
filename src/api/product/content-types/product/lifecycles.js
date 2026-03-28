@@ -1,6 +1,7 @@
 "use strict";
 
 const { PRODUCT_SERVICE } = require("../../../../utils/services");
+const logger = require("../../../../utils/logger");
 
 /**
  * Lifecycle callbacks para el content-type Product
@@ -54,7 +55,7 @@ async function syncCutProduct(productData, productId) {
                   data: { isActive: false },
                 },
               );
-              console.log(
+              logger.info(
                 `[Product Lifecycle] Auto-deactivated child cutItem product ${cut.id} because parent canCut is now false.`,
               );
             }
@@ -70,7 +71,7 @@ async function syncCutProduct(productData, productId) {
     }
 
     if (!cutUnit || !unit || !cutTransformationFactor || !name) {
-      console.warn(
+      logger.warn(
         `[Product ${productId}] canCut is true but missing cutUnit, unit, name, or cutTransformationFactor. Skipping sync.`,
       );
       return;
@@ -105,7 +106,7 @@ async function syncCutProduct(productData, productId) {
         },
       );
       factorId = newFactor.id;
-      console.log(
+      logger.info(
         `[Product Lifecycle] Created new transformation-factor ${factorId} for product ${productId}`,
       );
     }
@@ -146,7 +147,7 @@ async function syncCutProduct(productData, productId) {
         await strapi.entityService.update("api::product.product", childCut.id, {
           data: childProductData,
         });
-        console.log(
+        logger.info(
           `[Product Lifecycle] Updated child cutItem product ${childCut.id} for parent ${productId}`,
         );
       }
@@ -160,7 +161,7 @@ async function syncCutProduct(productData, productId) {
           data: childProductData,
         },
       );
-      console.log(
+      logger.info(
         `[Product Lifecycle] Created new child cutItem product ${newCutProduct.id} for parent ${productId}`,
       );
     }
@@ -345,7 +346,7 @@ module.exports = {
               collectionId = collections[0].id;
             } else {
               // Create new collection
-              console.log(
+              logger.info(
                 `[Product Lifecycle] Creating new collection: "${categoryName}"`,
               );
               const newCollection = await strapi.entityService.create(
@@ -368,7 +369,7 @@ module.exports = {
                   },
                 },
               );
-              console.log(
+              logger.info(
                 `[Product Lifecycle] Auto-assigned collection "${categoryName}" to product ${result.id}`,
               );
             }
@@ -386,7 +387,7 @@ module.exports = {
       await syncCutProduct(result, result.id);
 
       if (process.env.NODE_ENV !== "production") {
-        console.log(
+        logger.info(
           `[Product Lifecycle] Omitiendo sincronización con Siigo en ambiente no productivo (${process.env.NODE_ENV}).`,
         );
         return;
@@ -411,13 +412,13 @@ module.exports = {
             where: { id: result.id },
             data: { siigoId: String(productFromSiigo.id) },
           });
-          console.log(
+          logger.info(
             `[Product Lifecycle] Product ${result.id} vinculado con Siigo ID ${productFromSiigo.id}`,
           );
           return;
         }
       } else {
-        console.warn(
+        logger.warn(
           `[Product ${result.id}] No tiene code, se omite búsqueda en Siigo`,
         );
         return;
@@ -457,7 +458,7 @@ module.exports = {
       await syncCutProduct(fullProduct, result.id);
 
       if (process.env.NODE_ENV !== "production") {
-        console.log(
+        logger.info(
           `[Product Lifecycle] Omitiendo sincronización con Siigo en ambiente no productivo (${process.env.NODE_ENV}).`,
         );
         return;
@@ -485,7 +486,7 @@ module.exports = {
       const { result } = event;
 
       if (process.env.NODE_ENV !== "production") {
-        console.log(
+        logger.info(
           `[Product Lifecycle] Omitiendo sincronización con Siigo en ambiente no productivo (${process.env.NODE_ENV}).`,
         );
         return;

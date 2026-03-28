@@ -555,4 +555,83 @@ module.exports = {
       ctx.throw(500, error.message);
     }
   },
+
+  // ============================================
+  // ACCOUNTS RECEIVABLE (Cuentas por Cobrar)
+  // ============================================
+
+  /**
+   * Retorna todas las cuentas por cobrar (cuenta 1305) enriquecidas con vendedor.
+   * GET /api/siigo/accounts-receivable?year=2026&month_start=1&month_end=3&seller=X
+   */
+  async getAccountsReceivable(ctx) {
+    try {
+      const { year, month_start, month_end, seller } = ctx.query;
+      const arService = strapi.service("api::siigo.accounts-receivable");
+
+      const options = {};
+      if (year) options.year = parseInt(year);
+      if (month_start) options.month_start = parseInt(month_start);
+      if (month_end) options.month_end = parseInt(month_end);
+      if (seller) options.sellerId = seller;
+
+      const data = await arService.getAccountsReceivableWithSellers(options);
+
+      ctx.send({
+        success: true,
+        data,
+        meta: {
+          total: data.length,
+          totalBalance: data.reduce((s, i) => s + (i.saldo_final || 0), 0),
+          period: options,
+        },
+      });
+    } catch (error) {
+      console.error("Error en getAccountsReceivable:", error.message);
+      ctx.throw(500, error.message);
+    }
+  },
+
+  /**
+   * Descarga el reporte de cuentas por cobrar en Excel o PDF, agrupado por vendedor.
+   * GET /api/siigo/accounts-receivable/download?format=excel|pdf&seller=X&year=2026&month_start=1&month_end=3
+   */
+  async downloadAccountsReceivable(ctx) {
+    try {
+      const { format = "excel", seller, year, month_start, month_end } = ctx.query;
+      const arService = strapi.service("api::siigo.accounts-receivable");
+
+      const options = {};
+      if (year) options.year = parseInt(year);
+      if (month_start) options.month_start = parseInt(month_start);
+      if (month_end) options.month_end = parseInt(month_end);
+      if (seller) options.sellerId = seller;
+
+      const data = await arService.getDetailedAccountsReceivable(options);
+
+      const { year: y, month_start: ms, month_end: me } = options;
+      const periodLabel = y ? `${y} (meses ${ms || 1}–${me || 12})` : "Año en curso";
+      const meta = { period: periodLabel };
+
+      let buffer, contentType, filename;
+
+      if (format === "pdf") {
+        buffer = await arService.generatePdfReport(data, meta);
+        contentType = "application/pdf";
+        filename = `Cartera-Adatex-${new Date().toISOString().slice(0, 10)}.pdf`;
+      } else {
+        buffer = await arService.generateExcelReport(data, meta);
+        contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        filename = `Cartera-Adatex-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      }
+
+      ctx.set("Content-Type", contentType);
+      ctx.set("Content-Disposition", `attachment; filename="${filename}"`);
+      ctx.set("Content-Length", buffer.length);
+      ctx.body = buffer;
+    } catch (error) {
+      console.error("Error descargando cuentas por cobrar:", error.message);
+      ctx.throw(500, error.message);
+    }
+  },
 };

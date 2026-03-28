@@ -41,6 +41,16 @@ module.exports = {
       handler: "order.downloadInvoice",
     },
     {
+      path: "/orders/:purchaseOrderId/nationalizable-items",
+      method: "GET",
+      handler: "order.getNationalizableItems",
+    },
+    {
+      path: "/orders/:purchaseOrderId/nationalize",
+      method: "POST",
+      handler: "order.createNationalization",
+    },
+    {
       method: "POST",
       path: "/orders/test-email",
       handler: "order.testEmail",

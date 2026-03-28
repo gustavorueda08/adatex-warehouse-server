@@ -45,6 +45,7 @@ const generateOrderNumber = async (strapi, type, trx) => {
     out: "OUT",
     in: "IN",
     "partial-invoice": "PI",
+    nationalization: "NA",
   };
 
   const prefix = prefixMap[type];

@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const rateLimiter = require("./rateLimiter");
 
 /**
@@ -43,7 +44,7 @@ async function siigoFetch(url, options = {}, retryConfig = {}) {
       const method = options.method || "GET";
       if (process.env.NODE_ENV === "development" || process.env.SIIGO_LOG_REQUESTS === "true") {
         const stats = rateLimiter.getStats();
-        console.log(
+        logger.debug(
           `[Siigo API] ${method} ${url} ` +
           `(${stats.requestsInWindow}/${stats.maxRequests} req/min - ${stats.utilizationPercent}%)`
         );
@@ -58,7 +59,7 @@ async function siigoFetch(url, options = {}, retryConfig = {}) {
         // Calcular delay con exponential backoff
         const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
 
-        console.warn(
+        logger.debug(
           `[Siigo API] Error 429 (Too Many Requests) en ${url}. ` +
           `Reintento ${attempt + 1}/${maxAttempts} en ${delay}ms...`
         );
@@ -93,7 +94,7 @@ async function siigoFetch(url, options = {}, retryConfig = {}) {
     ) {
       const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
 
-      console.warn(
+      logger.debug(
         `[Siigo API] Error de red en ${url}: ${error.message}. ` +
         `Reintento ${attempt + 1}/${maxAttempts} en ${delay}ms...`
       );

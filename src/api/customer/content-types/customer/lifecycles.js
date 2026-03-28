@@ -1,6 +1,7 @@
 "use strict";
 
 const { TAX_SERVICE, CUSTOMER_SERVICE } = require("../../../../utils/services");
+const logger = require("../../../../utils/logger");
 
 /**
  * Lifecycle callbacks para el content-type Customer
@@ -53,7 +54,7 @@ module.exports = {
             where: { id: result.id },
             data: { siigoId: String(existingSiigoCustomer.id) },
           });
-          console.log(
+          logger.info(
             `[Customer Lifecycle] Customer ${result.id} vinculado con Siigo ID ${existingSiigoCustomer.id}`
           );
           return;
@@ -78,7 +79,7 @@ module.exports = {
       const customerSiigoService = strapi.service("api::siigo.customer");
 
       if (params.data?.skipSiigoSync) {
-        console.log(`[Customer Lifecycle] Siigo Sync Skipped for ${result.id}`);
+        logger.info(`[Customer Lifecycle] Siigo Sync Skipped for ${result.id}`);
         return;
       }
 

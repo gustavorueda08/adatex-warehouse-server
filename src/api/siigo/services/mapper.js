@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const moment = require("moment-timezone");
 const formatName = require("../../../utils/formatName");
 const units = require("../../../utils/units");
@@ -236,21 +237,21 @@ module.exports = ({ strapi }) => ({
         Math.round((invoiceTotalBeforeRetentions + retentionsAmount) * 100) /
         100;
 
-      console.log("=== Cálculo de factura DETALLADO (V2 Taxed Price) ===");
-      console.log(`Subtotal: ${invoiceSubtotal}`);
-      console.log(`Impuestos (aprox/calc): ${invoiceTaxes}`);
-      console.log(`Retenciones: ${retentionsAmount}`);
-      console.log(`Total a pagar: ${invoiceTotal}`);
+      logger.debug("=== Cálculo de factura DETALLADO (V2 Taxed Price) ===");
+      logger.debug(`Subtotal: ${invoiceSubtotal}`);
+      logger.debug(`Impuestos (aprox/calc): ${invoiceTaxes}`);
+      logger.debug(`Retenciones: ${retentionsAmount}`);
+      logger.debug(`Total a pagar: ${invoiceTotal}`);
 
       // Log de items para debug profundo
-      console.log("--- Detalle Items ---");
+      logger.debug("--- Detalle Items ---");
       items.forEach((item, idx) => {
         const lineTotal = Math.round(item.price * item.quantity * 100) / 100;
-        console.log(
+        logger.debug(
           `#${idx + 1} Code: ${item.code} | Price: ${item.price} | Qty: ${item.quantity} | Total: ${lineTotal}`,
         );
       });
-      console.log("================================");
+      logger.debug("================================");
 
       // Calcular fecha de vencimiento según términos de pago
       const paymentTermsDays = customer.paymentTerms || 0;
@@ -292,7 +293,7 @@ module.exports = ({ strapi }) => ({
       if (retentions.length > 0) {
         invoice.retentions = retentions;
       }
-      console.log(invoice);
+      logger.debug(invoice);
       return invoice;
     } catch (error) {
       console.error("Error al mapear orden a factura Siigo:", error.message);
@@ -330,7 +331,7 @@ module.exports = ({ strapi }) => ({
       // Calcular precio base (sin IVA si viene incluido)
       let basePrice = parseFloat(orderProduct.price);
       if (isNaN(basePrice) || basePrice <= 0) {
-        console.log(`Saltando producto ${product.code} por ser regalo (precio 0 o inválido).`);
+        logger.debug(`Saltando producto ${product.code} por ser regalo (precio 0 o inválido).`);
         continue; // Saltar productos que son regalos o no tienen precio
       }
       
@@ -345,7 +346,7 @@ module.exports = ({ strapi }) => ({
         // Asegurar que el precio con impuestos tampoco exceda 6 decimales (por seguridad)
         taxedPrice = Number(originalPrice.toFixed(6));
 
-        console.log(
+        logger.debug(
           `Producto ${product.code}: IVA incluido via taxed_price. Base (6 dec): ${basePrice}, Taxed: ${taxedPrice}`,
         );
       } else {
@@ -469,7 +470,7 @@ module.exports = ({ strapi }) => ({
           continue;
         }
 
-        console.log(tax);
+        logger.debug(tax);
 
         // Verificar si el tax aplica según su applicationType
         let shouldApply = tax.applicationType === "product";
@@ -504,7 +505,7 @@ module.exports = ({ strapi }) => ({
           });
         }
       }
-      console.log("IMPUESTOS", taxes);
+      logger.debug("IMPUESTOS", taxes);
       return taxes;
     } catch (error) {
       console.error("Error al obtener taxes:", error.message);
@@ -570,7 +571,7 @@ module.exports = ({ strapi }) => ({
 
         if (shouldApply) {
           // Formato de retention para Siigo: solo necesita el ID
-          console.log(
+          logger.debug(
             `Adding retention from tax: ${tax.name} (Siigo Code: ${tax.siigoCode})`,
           );
           retentions.push({
@@ -579,7 +580,7 @@ module.exports = ({ strapi }) => ({
         }
       }
 
-      console.log("RETENCIONES (subtotal taxes):", retentions);
+      logger.debug("RETENCIONES (subtotal taxes):", retentions);
       return retentions;
     } catch (error) {
       console.error("Error al obtener retenciones:", error.message);

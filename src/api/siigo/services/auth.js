@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const { siigoFetch } = require("../utils/siigoFetch");
 
 /**
@@ -77,7 +78,7 @@ module.exports = () => ({
       tokenCache.token = data.access_token;
       const expiresIn = data.expires_in || 86400; // Default 24h en segundos
       tokenCache.expiresAt = new Date().getTime() + expiresIn * 1000;
-      console.log("Nuevo token de Siigo obtenido exitosamente");
+      logger.info("Nuevo token de Siigo obtenido exitosamente");
       return tokenCache.token;
     } catch (error) {
       console.error("Error al obtener token de Siigo:", error.message);

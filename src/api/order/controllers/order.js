@@ -53,7 +53,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       if (!data?.data) {
         throw new Error("Los datos de la orden son requeridos");
       }
-      console.log(JSON.stringify(data.data));
 
       const { products = [], ...rest } = data.data;
       const order = await orderService.update({
@@ -125,8 +124,6 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       if (!data) {
         throw new Error("Los datos del producto son requeridos");
       }
-
-      console.log("ADD DATA", data);
 
       const updatedOrder = await orderService.addItem({ ...data, id: orderId });
 
@@ -347,8 +344,110 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
     }
   },
 
+  /**
+   * Devuelve los items disponibles para nacionalizar de una orden de compra en zona franca.
+   * GET /api/orders/:purchaseOrderId/nationalizable-items
+   */
+  async getNationalizableItems(ctx) {
+    try {
+      const orderService = strapi.service(ORDER_SERVICE);
+      const { purchaseOrderId } = ctx.params;
+
+      if (!purchaseOrderId) {
+        throw new Error("El id de la orden de compra es requerido");
+      }
+
+      const items = await orderService.getNationalizableItems(purchaseOrderId);
+
+      return {
+        data: items,
+        meta: { count: items.length, productCount: items.length },
+      };
+    } catch (error) {
+      logger.error("Error al obtener items nacionalizables:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "NationalizableItemsError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
+  /**
+   * Crea una orden de nacionalización a partir de una orden de compra en zona franca.
+   * POST /api/orders/:purchaseOrderId/nationalize
+   * Body: {
+   *   destinationWarehouseId: number,
+   *   products: [{ product: number, quantity: number }],
+   *   notes?: string
+   * }
+   */
+  async createNationalization(ctx) {
+    try {
+      const orderService = strapi.service(ORDER_SERVICE);
+      const { purchaseOrderId } = ctx.params;
+      const data = ctx.request.body;
+
+      if (!purchaseOrderId) {
+        throw new Error("El id de la orden de compra es requerido");
+      }
+
+      if (!data?.destinationWarehouseId) {
+        throw new Error("La bodega destino (destinationWarehouseId) es requerida");
+      }
+
+      if (!data?.products || !Array.isArray(data.products) || data.products.length === 0) {
+        throw new Error("Se requiere al menos un producto con cantidad para nacionalizar");
+      }
+
+      for (const p of data.products) {
+        if (!p.product) throw new Error("Cada producto debe tener el campo 'product'");
+        const hasQty = p.quantity && p.quantity > 0;
+        const hasItems = Array.isArray(p.itemIds) && p.itemIds.length > 0;
+        if (!hasQty && !hasItems) {
+          throw new Error(
+            "Cada producto debe tener una cantidad mayor a 0 o items seleccionados (itemIds)",
+          );
+        }
+      }
+
+      const order = await orderService.createNationalization({
+        purchaseOrderId,
+        destinationWarehouseId: data.destinationWarehouseId,
+        products: data.products,
+        notes: data.notes,
+      });
+
+      return {
+        data: order,
+        meta: {
+          message: "Orden de nacionalización creada exitosamente",
+        },
+      };
+    } catch (error) {
+      logger.error("Error al crear orden de nacionalización:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "NationalizationCreationError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
   async testEmail(ctx) {
     try {
+      // Only administrators may trigger test emails
+      const userRole = ctx.state.user?.role?.type;
+      if (!ctx.state.user || userRole !== "administrator") {
+        return ctx.forbidden("Se requiere rol de administrador");
+      }
+
       const { to } = ctx.request.body;
       if (!to) {
         return ctx.badRequest("Missing 'to' email address in body");

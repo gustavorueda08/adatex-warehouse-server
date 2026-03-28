@@ -1,5 +1,7 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
+
 /**
  * Rate Limiter para la API de Siigo
  *
@@ -81,7 +83,7 @@ class SiigoRateLimiter {
 
     if (waitTime > 0) {
       const currentCount = this.getRequestCount();
-      console.log(
+      logger.debug(
         `[Siigo Rate Limiter] Límite alcanzado (${currentCount}/${this.maxRequests} req/min). ` +
         `Esperando ${Math.ceil(waitTime / 1000)}s...`
       );

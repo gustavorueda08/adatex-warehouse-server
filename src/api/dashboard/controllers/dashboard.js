@@ -12,8 +12,6 @@ module.exports = {
     try {
       const dashboardService = strapi.service("api::dashboard.dashboard");
       const { sellerId } = ctx.query;
-      console.log("sellerId", sellerId);
-      
       const data = await dashboardService.getDashboardStats(sellerId);
       const response = {
         data,

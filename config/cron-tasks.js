@@ -18,4 +18,14 @@ module.exports = {
       .service("api::customer.customer")
       .calculateAnalytics();
   },
+
+  /**
+   * Cron job para calcular predicciones de demanda por cliente × producto.
+   * Se ejecuta cada día a las 2:00 AM (después de analytics).
+   */
+  "0 2 * * *": async ({ strapi }) => {
+    await strapi
+      .service("api::demand-forecast.demand-forecast")
+      .calculateForecasts();
+  },
 };

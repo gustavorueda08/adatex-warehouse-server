@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const { ORDER_SERVICE } = require("../../../utils/services");
 const { siigoFetch } = require("../utils/siigoFetch");
 
@@ -47,7 +48,7 @@ module.exports = ({ strapi }) => ({
           }
 
           if (op.product && !op.product.siigoId) {
-            console.log(
+            logger.info(
               `Auto-sincronizando producto ${op.product.code || op.product.name} con Siigo antes de facturar...`,
             );
             try {
@@ -65,7 +66,7 @@ module.exports = ({ strapi }) => ({
                 });
                 // Actualizar en el objeto de memoria para que pase la validación
                 op.product.siigoId = String(siigoProduct.id);
-                console.log(
+                logger.info(
                   `✓ Producto enlazado con Siigo existente: ${siigoProduct.id}`,
                 );
               } else {
@@ -74,7 +75,7 @@ module.exports = ({ strapi }) => ({
                 );
                 // Actualizar en el objeto de memoria para que pase la validación
                 op.product.siigoId = syncResult.siigoId;
-                console.log(
+                logger.info(
                   `✓ Producto creado en Siigo: ${syncResult.siigoId}`,
                 );
               }
@@ -103,11 +104,11 @@ module.exports = ({ strapi }) => ({
       const { needsSplit, typeAProducts, typeBProducts } =
         splitOrderProductsForDualInvoices(order);
 
-      console.log(
+      logger.info(
         `Orden ${order.code} - Necesita split: ${needsSplit ? "SÍ" : "NO"}`,
       );
-      console.log(`  - Productos tipo A: ${typeAProducts.length}`);
-      console.log(`  - Productos tipo B: ${typeBProducts.length}`);
+      logger.info(`  - Productos tipo A: ${typeAProducts.length}`);
+      logger.info(`  - Productos tipo B: ${typeBProducts.length}`);
 
       const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
       let invoiceTypeA = null;
@@ -116,13 +117,13 @@ module.exports = ({ strapi }) => ({
       // ========== CREAR FACTURA TIPO A (ELECTRÓNICA) ==========
       if (typeAProducts.length > 0) {
         try {
-          console.log("Creando factura tipo A (electrónica)...");
+          logger.info("Creando factura tipo A (electrónica)...");
           const orderTypeA = { ...order, orderProducts: typeAProducts };
           const invoiceDataTypeA = await mapperService.mapOrderToInvoice(
             orderTypeA,
             28338,
           );
-          console.log(
+          logger.debug(
             "Datos factura tipo A:",
             JSON.stringify(invoiceDataTypeA, null, 2),
           );
@@ -131,7 +132,7 @@ module.exports = ({ strapi }) => ({
             apiUrl,
             authService,
           );
-          console.log(`✓ Factura tipo A creada: ${invoiceTypeA.id}`);
+          logger.info(`✓ Factura tipo A creada: ${invoiceTypeA.id}`);
         } catch (error) {
           console.error("Error al crear factura tipo A:", error.message);
           throw new Error(
@@ -139,13 +140,13 @@ module.exports = ({ strapi }) => ({
           );
         }
       } else {
-        console.log("No hay productos para factura Tipo A (todo va a Tipo B)");
+        logger.info("No hay productos para factura Tipo A (todo va a Tipo B)");
       }
 
       // ========== CREAR FACTURA TIPO B (NORMAL) SI ES NECESARIO ==========
       if (needsSplit) {
         try {
-          console.log("Creando factura tipo B (normal)...");
+          logger.info("Creando factura tipo B (normal)...");
           const orderTypeB = {
             ...order,
             customerForInvoice: { ...order.customerForInvoice, taxes: [] }, // Sin impuestos para Tipo B
@@ -158,7 +159,7 @@ module.exports = ({ strapi }) => ({
             11534,
           );
 
-          console.log(
+          logger.debug(
             "Datos factura tipo B:",
             JSON.stringify(invoiceDataTypeB, null, 2),
           );
@@ -168,7 +169,7 @@ module.exports = ({ strapi }) => ({
             apiUrl,
             authService,
           );
-          console.log(`✓ Factura tipo B creada: ${invoiceTypeB.id}`);
+          logger.info(`✓ Factura tipo B creada: ${invoiceTypeB.id}`);
         } catch (error) {
           console.error("Error al crear factura tipo B:", error.message);
           // IMPORTANTE: Si falla tipo B, y se creó A, no revertir A
@@ -236,7 +237,7 @@ module.exports = ({ strapi }) => ({
       updateData.invoices = invoiceIds;
       updateData.emitInvoice = false;
 
-      console.log(
+      logger.debug(
         "Updating Order with data:",
         JSON.stringify(updateData, null, 2),
       );
@@ -249,7 +250,7 @@ module.exports = ({ strapi }) => ({
         },
       );
 
-      console.log(
+      logger.debug(
         "Order update result:",
         JSON.stringify(updateResult, null, 2),
       );
@@ -267,10 +268,10 @@ module.exports = ({ strapi }) => ({
           markItemsAsInvoiced,
         } = require("../../order/utils/invoiceHelpers");
         await markItemsAsInvoiced(itemIds);
-        console.log(`${itemIds.length} items marcados como facturados`);
+        logger.info(`${itemIds.length} items marcados como facturados`);
       }
 
-      console.log(
+      logger.info(
         `✓ Order ${order.code} actualizada con facturas:${invoiceTypeA ? " Tipo A" : ""}${invoiceTypeB ? " Tipo B" : ""}`,
       );
 
@@ -349,7 +350,7 @@ module.exports = ({ strapi }) => ({
 
       if (response.status === 400 && retryCount < 3) {
         // Lógica de reintento para errores de totales (redondeo)
-        console.log(
+        logger.info(
           `Error 400 recibido (Intento ${retryCount + 1}). Intentando extraer valor correcto para reintento...`,
         );
         try {
@@ -383,7 +384,7 @@ module.exports = ({ strapi }) => ({
               // Usamos un epsilon pequeño para comparar floats
               if (diff < 0.0001) continue;
 
-              console.log(`[Siigo Retry] Candidato: ${val} (Diff: ${diff})`);
+              logger.debug(`[Siigo Retry] Candidato: ${val} (Diff: ${diff})`);
 
               // Nos quedamos con el que tenga la menor diferencia (o simplemente el primero válido si confiamos en el mensaje)
               // En el mensaje de error de Siigo, el valor esperado suele ser el único otro número decimal grande.
@@ -399,7 +400,7 @@ module.exports = ({ strapi }) => ({
             }
 
             if (newTotal !== null) {
-              console.log(
+              logger.info(
                 `[Siigo Retry] Ajustando total de pago: ${currentTotal} -> ${newTotal}`,
               );
 
@@ -559,7 +560,7 @@ module.exports = ({ strapi }) => ({
    */
   async processCompletedOrders() {
     try {
-      console.log("Buscando órdenes completadas pendientes de facturación...");
+      logger.info("Buscando órdenes completadas pendientes de facturación...");
 
       // Buscar órdenes de tipo sale, estado completed, sin siigoId
       const orders = await strapi.entityService.findMany(ORDER_SERVICE, {
@@ -579,7 +580,7 @@ module.exports = ({ strapi }) => ({
       });
 
       if (!orders || orders.length === 0) {
-        console.log("No hay órdenes pendientes de facturación");
+        logger.info("No hay órdenes pendientes de facturación");
         return {
           success: true,
           processed: 0,
@@ -589,7 +590,7 @@ module.exports = ({ strapi }) => ({
         };
       }
 
-      console.log(`Encontradas ${orders.length} órdenes para facturar`);
+      logger.info(`Encontradas ${orders.length} órdenes para facturar`);
 
       const results = [];
       let successful = 0;
@@ -620,7 +621,7 @@ module.exports = ({ strapi }) => ({
         }
       }
 
-      console.log(
+      logger.info(
         `Procesamiento completado. Exitosas: ${successful}, Fallidas: ${failed}`,
       );
 

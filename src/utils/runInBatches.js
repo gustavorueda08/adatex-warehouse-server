@@ -1,9 +1,26 @@
 /**
- * Ejecuta funciones asíncronas con límite de concurrencia.
- * @param {Array} array - Elementos a procesar
- * @param {Function} asyncFn - Función asíncrona
- * @param {number} concurrency - Máximo de tareas simultáneas
- * @returns {Promise<Array>}
+ * @fileoverview Concurrency-limited async batch processor.
+ *
+ * Runs an async function over an array while keeping at most `concurrency`
+ * Promises in-flight at the same time. Results are written to the same index
+ * as the input element so the returned array mirrors the input order.
+ *
+ * Why not Promise.all? Promise.all launches every Promise at once. For large
+ * arrays this can exhaust database connections or hit rate limits. This
+ * utility acts as a sliding-window semaphore.
+ *
+ * @example
+ * // Process up to 5 items concurrently
+ * const results = await runInBatches(orderIds, fetchOrder, 5);
+ */
+
+/**
+ * @template T, R
+ * @param {T[]} array - Items to process.
+ * @param {function(T): Promise<R>} asyncFn - Async function applied to each item.
+ * @param {number} [concurrency=100] - Maximum number of simultaneous Promises.
+ * @returns {Promise<R[]>} Resolves with results in input order.
+ *   Rejects immediately if any invocation of `asyncFn` rejects.
  */
 async function runInBatches(array, asyncFn, concurrency = 100) {
   const results = new Array(array.length);
@@ -29,6 +46,7 @@ async function runInBatches(array, asyncFn, concurrency = 100) {
           });
       }
     }
+
     next();
   });
 }

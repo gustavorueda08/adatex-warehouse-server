@@ -288,6 +288,22 @@ module.exports = {
     },
 
     // ============================================
+    // ACCOUNTS RECEIVABLE
+    // ============================================
+    {
+      method: "GET",
+      path: "/siigo/accounts-receivable/download",
+      handler: "siigo.downloadAccountsReceivable",
+      config: { policies: [], middlewares: [] },
+    },
+    {
+      method: "GET",
+      path: "/siigo/accounts-receivable",
+      handler: "siigo.getAccountsReceivable",
+      config: { policies: [], middlewares: [] },
+    },
+
+    // ============================================
     // TAXES
     // ============================================
     {

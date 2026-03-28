@@ -563,6 +563,35 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         validateOrderIsEditable(currentOrder);
 
+        // Guard: items from a zona franca warehouse cannot be added to sale orders.
+        // They must first be nationalized to a regular stock warehouse.
+        if (currentOrder.type === ORDER_TYPES.SALE) {
+          const WAREHOUSE_TYPES = require("../../../utils/warehouseTypes");
+          const { WAREHOUSE_SERVICE: WH_SERVICE } = require("../../../utils/services");
+          const FTZ = WAREHOUSE_TYPES.FREE_TRADE_ZONE;
+          const FTZ_ERROR =
+            "No se pueden agregar items de una bodega zona franca a una orden de venta. " +
+            "Primero debe nacionalizar la mercancía.";
+
+          // Check by explicit warehouse id (quantity+product lookup path)
+          const itemWarehouseId = item?.warehouse || currentOrder.sourceWarehouse?.id;
+          if (itemWarehouseId) {
+            const wh = await strapi.entityService.findOne(WH_SERVICE, itemWarehouseId, {
+              transacting: trx,
+            });
+            if (wh?.type === FTZ) throw new Error(FTZ_ERROR);
+          }
+
+          // Check by item id (direct id/barcode lookup path)
+          if (item?.id) {
+            const existingItem = await strapi.entityService.findOne(ITEM_SERVICE, item.id, {
+              populate: ["warehouse"],
+              transacting: trx,
+            });
+            if (existingItem?.warehouse?.type === FTZ) throw new Error(FTZ_ERROR);
+          }
+        }
+
         // Auto-transition DRAFT to CONFIRMED for sale and out orders
         if (
           currentOrder.state === ORDER_STATES.DRAFT &&
@@ -1187,5 +1216,296 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
       // Propagar error para que el controller lo maneje
       throw error;
     }
+  },
+
+  /**
+   * Devuelve los items disponibles para nacionalizar de una orden de compra
+   * que esté en una bodega de zona franca.
+   *
+   * @param {number|string} purchaseOrderId - ID de la orden de compra completada.
+   * @returns {Promise<Array>} Lista de items AVAILABLE agrupados por producto.
+   */
+  async getNationalizableItems(purchaseOrderId) {
+    const WAREHOUSE_TYPES = require("../../../utils/warehouseTypes");
+
+    const purchaseOrder = await strapi.entityService.findOne(
+      ORDER_SERVICE,
+      purchaseOrderId,
+      {
+        populate: [
+          "destinationWarehouse",
+          "orderProducts",
+          "orderProducts.product",
+        ],
+      },
+    );
+
+    if (!purchaseOrder) {
+      throw new Error("La orden de compra no existe");
+    }
+
+    if (purchaseOrder.type !== ORDER_TYPES.PURCHASE) {
+      throw new Error("La orden no es una orden de compra");
+    }
+
+    if (purchaseOrder.state !== ORDER_STATES.COMPLETED) {
+      throw new Error(
+        "La orden de compra debe estar completada para poder nacionalizar",
+      );
+    }
+
+    const warehouse = purchaseOrder.destinationWarehouse;
+    if (!warehouse || warehouse.type !== WAREHOUSE_TYPES.FREE_TRADE_ZONE) {
+      throw new Error(
+        "La bodega destino de la orden de compra no es una zona franca",
+      );
+    }
+
+    // Obtener todos los items AVAILABLE en la bodega zona franca para los
+    // productos de esta orden de compra.
+    const productIds = purchaseOrder.orderProducts.map((op) => op.product.id);
+
+    const items = await strapi.entityService.findMany(ITEM_SERVICE, {
+      filters: {
+        warehouse: warehouse.id,
+        state: ITEM_STATES.AVAILABLE,
+        product: { id: { $in: productIds } },
+      },
+      populate: ["product", "warehouse"],
+      sort: ["createdAt:asc"],
+      limit: -1,
+    });
+
+    // Group by product
+    const grouped = {};
+    for (const item of items) {
+      const pid = item.product.id;
+      if (!grouped[pid]) {
+        grouped[pid] = {
+          product: item.product,
+          items: [],
+          totalAvailable: 0,
+        };
+      }
+      grouped[pid].items.push(item);
+      grouped[pid].totalAvailable += Number(item.currentQuantity) || 0;
+    }
+    return Object.values(grouped);
+  },
+
+  /**
+   * Crea una orden de nacionalización a partir de una orden de compra en
+   * zona franca. Selecciona items FIFO por producto hasta cubrir las
+   * cantidades solicitadas y crea la orden de tipo `nationalization` en
+   * estado CONFIRMED, lista para ser procesada y completada.
+   *
+   * @param {Object} data
+   * @param {number|string} data.purchaseOrderId   - ID de la orden de compra origen.
+   * @param {number|string} data.destinationWarehouseId - ID de la bodega stock destino.
+   * @param {Array<{product: number, quantity: number}>} data.products - Productos y cantidades a nacionalizar.
+   * @param {string} [data.notes] - Notas opcionales.
+   * @returns {Promise<Object>} La orden de nacionalización creada.
+   */
+  async createNationalization({
+    purchaseOrderId,
+    destinationWarehouseId,
+    products,
+    notes,
+  }) {
+    const WAREHOUSE_TYPES = require("../../../utils/warehouseTypes");
+    const { WAREHOUSE_SERVICE } = require("../../../utils/services");
+
+    return await strapi.db.transaction(async (trx) => {
+      // 1. Validar la orden de compra origen
+      const purchaseOrder = await strapi.entityService.findOne(
+        ORDER_SERVICE,
+        purchaseOrderId,
+        {
+          populate: ["destinationWarehouse", "orderProducts", "orderProducts.product"],
+          transacting: trx,
+        },
+      );
+
+      if (!purchaseOrder) {
+        throw new Error("La orden de compra no existe");
+      }
+      if (purchaseOrder.type !== ORDER_TYPES.PURCHASE) {
+        throw new Error("La orden origen debe ser una orden de compra");
+      }
+      if (purchaseOrder.state !== ORDER_STATES.COMPLETED) {
+        throw new Error(
+          "La orden de compra debe estar completada para nacionalizar",
+        );
+      }
+
+      const sourceWarehouse = purchaseOrder.destinationWarehouse;
+      if (!sourceWarehouse || sourceWarehouse.type !== WAREHOUSE_TYPES.FREE_TRADE_ZONE) {
+        throw new Error(
+          "La bodega de la orden de compra no es una zona franca",
+        );
+      }
+
+      // 2. Validar la bodega destino
+      const destinationWarehouse = await strapi.entityService.findOne(
+        WAREHOUSE_SERVICE,
+        destinationWarehouseId,
+        { transacting: trx },
+      );
+
+      if (!destinationWarehouse) {
+        throw new Error("La bodega destino no existe");
+      }
+      if (destinationWarehouse.type !== WAREHOUSE_TYPES.STOCK) {
+        throw new Error(
+          "La bodega destino debe ser de tipo stock",
+        );
+      }
+
+      // 3. Para cada producto, seleccionar items FIFO en la bodega zona franca
+      const orderProductService = strapi.service(ORDER_PRODUCT_SERVICE);
+      const itemsToNationalize = []; // [{ productId, items: [item] }]
+
+      for (const { product: productId, quantity: requestedQty, itemIds } of products) {
+        if (!productId) {
+          throw new Error(`Producto inválido: falta el campo product`);
+        }
+
+        let selected = [];
+
+        if (itemIds && Array.isArray(itemIds) && itemIds.length > 0) {
+          // Explicit item selection
+          selected = await strapi.entityService.findMany(ITEM_SERVICE, {
+            filters: {
+              id: { $in: itemIds },
+              product: productId,
+              warehouse: sourceWarehouse.id,
+              state: ITEM_STATES.AVAILABLE,
+            },
+            populate: ["product"],
+            limit: -1,
+            transacting: trx,
+          });
+          if (selected.length !== itemIds.length) {
+            throw new Error(
+              `Algunos items seleccionados no están disponibles para el producto ${productId}. ` +
+                `Se solicitaron ${itemIds.length} y solo ${selected.length} están disponibles.`,
+            );
+          }
+        } else if (requestedQty && requestedQty > 0) {
+          // FIFO quantity selection
+          const available = await strapi.entityService.findMany(ITEM_SERVICE, {
+            filters: {
+              product: productId,
+              warehouse: sourceWarehouse.id,
+              state: ITEM_STATES.AVAILABLE,
+            },
+            populate: ["product"],
+            sort: ["createdAt:asc"],
+            limit: -1,
+            transacting: trx,
+          });
+
+          let remaining = requestedQty;
+          for (const item of available) {
+            if (remaining <= 0) break;
+            selected.push(item);
+            remaining -= item.currentQuantity;
+          }
+
+          if (remaining > 0.0001) {
+            const found = requestedQty - remaining;
+            throw new Error(
+              `Stock insuficiente en zona franca para producto ${productId}. ` +
+                `Se solicitaron ${requestedQty} y solo hay ${found} disponibles.`,
+            );
+          }
+        } else {
+          throw new Error(
+            `Producto ${productId}: debe especificar una cantidad (quantity) o items seleccionados (itemIds)`,
+          );
+        }
+
+        itemsToNationalize.push({ productId, items: selected });
+      }
+
+      // 4. Crear la orden de nacionalización
+      const code = await generateOrderNumber(strapi, ORDER_TYPES.NATIONALIZATION, trx);
+      const moment = require("moment-timezone");
+      moment.tz.setDefault("America/Bogota");
+
+      const order = await strapi.entityService.create(ORDER_SERVICE, {
+        data: {
+          type: ORDER_TYPES.NATIONALIZATION,
+          code,
+          state: ORDER_STATES.CONFIRMED,
+          sourceWarehouse: sourceWarehouse.id,
+          destinationWarehouse: destinationWarehouse.id,
+          parentOrder: purchaseOrderId,
+          notes: notes || `Nacionalización parcial de orden ${purchaseOrder.code}`,
+          createdDate: moment().toDate(),
+          confirmedDate: moment().toDate(),
+        },
+        populate: ORDER_POPULATE_BASIC,
+        transacting: trx,
+      });
+
+      // 5. Crear OrderProducts e items para cada producto
+      for (const { productId, items } of itemsToNationalize) {
+        const product = await strapi.entityService.findOne(
+          PRODUCT_SERVICE,
+          productId,
+          { transacting: trx },
+        );
+
+        const orderProduct = await orderProductService.create({
+          product: productId,
+          order: order.id,
+          requestedQuantity: items.reduce((s, i) => s + i.currentQuantity, 0),
+          requestedPackages: items.length,
+          notes: `Nacionalización de ${items.length} item(s) de ${product?.name || productId}`,
+          price: items[0]?.cost || 0,
+          trx,
+        });
+
+        // Reservar cada item seleccionado usando la estrategia de nacionalización
+        for (const item of items) {
+          await strapi.service(ORDER_SERVICE).doItemMovement({
+            movementType: ITEM_MOVEMENT_TYPES.CREATE,
+            item: { id: item.id },
+            order,
+            orderProduct,
+            product,
+            orderState: order.state,
+            trx,
+          });
+        }
+
+        await orderProductService.update({
+          id: orderProduct.id,
+          orderState: order.state,
+          trx,
+        });
+      }
+
+      // 6. Retornar la orden completa
+      const fullOrder = await strapi.entityService.findOne(ORDER_SERVICE, order.id, {
+        populate: ORDER_POPULATE,
+        transacting: trx,
+      });
+
+      strapi.io
+        ?.to(`order:${fullOrder.id}`)
+        .emit("order:created", fullOrder);
+
+      logger.info("Nationalization order created", {
+        orderId: fullOrder.id,
+        code,
+        purchaseOrderId,
+        destinationWarehouseId,
+        productCount: itemsToNationalize.length,
+      });
+
+      return fullOrder;
+    });
   },
 }));

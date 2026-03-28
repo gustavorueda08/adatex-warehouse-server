@@ -56,7 +56,6 @@ module.exports = createCoreController("api::product.product", ({ strapi }) => ({
     try {
       const productService = strapi.service("api::product.product");
       const result = await productService.findWithInventory(ctx.query);
-      console.log("QUERY", JSON.stringify(ctx.query));
 
       return result;
     } catch (error) {

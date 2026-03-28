@@ -5,26 +5,30 @@ module.exports = {
 
   bootstrap({ strapi }) {
     const { Server } = require("socket.io");
-    // const { createAdapter } = require("@socket.io/redis-adapter");
-    // const { createClient } = require("redis");
+
+    // Allowed origins for Socket.io — mirrors the CORS list in config/middlewares.js.
+    // Add CORS_ADDITIONAL_ORIGINS (comma-separated) in .env to extend without code changes.
+    const corsOrigins = [
+      "http://localhost:3000",
+      "https://www.adatex.com.co",
+      "https://adatex.com.co",
+      "https://adatex-warehouse-server-production.up.railway.app",
+      ...(process.env.CORS_ADDITIONAL_ORIGINS
+        ? process.env.CORS_ADDITIONAL_ORIGINS.split(",").map((o) => o.trim())
+        : []),
+    ];
 
     const io = new Server(strapi.server.httpServer, {
       cors: {
-        origin: [
-          "http://localhost:3000",
-          "https://www.adatex.com.co",
-          "https://adatex.com.co",
-          "https://adatex-warehouse-server-production.up.railway.app",
-        ],
+        origin: corsOrigins,
         methods: ["GET", "POST"],
         credentials: true,
       },
-      // path: "/realtime", // opcional
     });
 
     strapi.io = io;
 
-    // 🔐 Auth obligatorio
+    // Require a valid JWT on every socket connection
     io.use(async (socket, next) => {
       try {
         const authHeader = socket.handshake?.headers?.authorization || "";
@@ -33,28 +37,22 @@ module.exports = {
           : null;
 
         const token =
-          socket.handshake?.auth?.token || // 40{"token":"..."} en CONNECT
+          socket.handshake?.auth?.token || // { token: "..." } in CONNECT payload
           socket.handshake?.query?.token || // ?token=...
           tokenFromHeader; // Authorization: Bearer ...
 
         if (!token) return next(new Error("Unauthorized"));
 
-        // users-permissions JWT
         const jwtService = strapi.plugins["users-permissions"].services.jwt;
-
-        // ✅ Si verify es async en tu build, este await es necesario.
-        //    Si es sync, no pasa nada por dejar el await.
         const payload = await jwtService.verify(token);
 
-        if (!payload || !payload.id) {
-          return next(new Error("Unauthorized"));
-        }
+        if (!payload?.id) return next(new Error("Unauthorized"));
 
         socket.data = socket.data || {};
         socket.data.user = { id: payload.id };
 
         return next();
-      } catch (err) {
+      } catch {
         return next(new Error("Unauthorized"));
       }
     });
@@ -66,22 +64,17 @@ module.exports = {
         return;
       }
 
-      console.log("Usuario conectado:", userId, socket.id);
+      strapi.log.info(`Socket connected: user=${userId} socket=${socket.id}`);
 
-      // Sala personal
+      // Join a personal room so the server can push user-specific events
       socket.join(`user:${userId}`);
 
-      // 👉 Si MÁS ADELANTE haces I/O aquí, vuelve el handler async:
-      socket.on("join:order", (orderId) => {
-        socket.join(`order:${orderId}`);
-      });
-
-      socket.on("leave:order", (orderId) => {
-        socket.leave(`order:${orderId}`);
-      });
+      // Rooms scoped to a specific order (used for real-time order updates)
+      socket.on("join:order", (orderId) => socket.join(`order:${orderId}`));
+      socket.on("leave:order", (orderId) => socket.leave(`order:${orderId}`));
 
       socket.on("disconnect", () => {
-        console.log("Usuario desconectado:", userId);
+        strapi.log.info(`Socket disconnected: user=${userId}`);
       });
     });
   },

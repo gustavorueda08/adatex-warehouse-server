@@ -558,6 +558,47 @@ export interface ApiCustomerCustomer extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiDemandForecastDemandForecast
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'demand_forecasts';
+  info: {
+    displayName: 'DemandForecast';
+    pluralName: 'demand-forecasts';
+    singularName: 'demand-forecast';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    avgMonthlyQty: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    avgMonthlyVolume: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    calculatedAt: Schema.Attribute.DateTime;
+    confidence: Schema.Attribute.Enumeration<['high', 'medium', 'low']> &
+      Schema.Attribute.DefaultTo<'low'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    customer: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
+    forecastQty: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    forecastVolume: Schema.Attribute.Decimal & Schema.Attribute.DefaultTo<0>;
+    lastOrderDate: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::demand-forecast.demand-forecast'
+    > &
+      Schema.Attribute.Private;
+    nextExpectedPurchaseDate: Schema.Attribute.Date;
+    product: Schema.Attribute.Relation<'manyToOne', 'api::product.product'>;
+    publishedAt: Schema.Attribute.DateTime;
+    purchaseFrequencyDays: Schema.Attribute.Integer &
+      Schema.Attribute.DefaultTo<0>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiInventoryMovementInventoryMovement
   extends Struct.CollectionTypeSchema {
   collectionName: 'inventory_movements';
@@ -935,6 +976,7 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
         'adjustment',
         'transform',
         'partial-invoice',
+        'nationalization',
       ]
     > &
       Schema.Attribute.Required;
@@ -1303,7 +1345,15 @@ export interface ApiWarehouseWarehouse extends Struct.CollectionTypeSchema {
     >;
     sourceOrders: Schema.Attribute.Relation<'oneToMany', 'api::order.order'>;
     type: Schema.Attribute.Enumeration<
-      ['stock', 'smartCut', 'transit', 'production', 'defective', 'printlab']
+      [
+        'stock',
+        'smartCut',
+        'transit',
+        'production',
+        'defective',
+        'printlab',
+        'freeTradeZone',
+      ]
     > &
       Schema.Attribute.DefaultTo<'stock'>;
     updatedAt: Schema.Attribute.DateTime;
@@ -1854,6 +1904,7 @@ declare module '@strapi/strapi' {
       'api::collection.collection': ApiCollectionCollection;
       'api::configuration.configuration': ApiConfigurationConfiguration;
       'api::customer.customer': ApiCustomerCustomer;
+      'api::demand-forecast.demand-forecast': ApiDemandForecastDemandForecast;
       'api::inventory-movement.inventory-movement': ApiInventoryMovementInventoryMovement;
       'api::invoice.invoice': ApiInvoiceInvoice;
       'api::item.item': ApiItemItem;

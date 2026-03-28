@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const { SUPPLIER_SERVICE } = require("../../../utils/services");
 const { siigoFetch } = require("../utils/siigoFetch");
 
@@ -16,13 +17,13 @@ module.exports = ({ strapi }) => ({
    */
   async syncFromSiigo(siigoId) {
     try {
-      console.log(`Sincronizando supplier ${siigoId} desde Siigo...`);
+      logger.info(`Sincronizando supplier ${siigoId} desde Siigo...`);
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
       let siigoSupplier;
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando consulta de supplier desde Siigo");
+        logger.info("[TEST MODE] Simulando consulta de supplier desde Siigo");
         siigoSupplier = {
           id: siigoId,
           type: "Supplier",
@@ -77,12 +78,12 @@ module.exports = ({ strapi }) => ({
           where: { id: existingSuppliers[0].id },
           data: supplierData,
         });
-        console.log(`Supplier ${siigoId} actualizado localmente`);
+        logger.info(`Supplier ${siigoId} actualizado localmente`);
       } else {
         localSupplier = await strapi.db.query(SUPPLIER_SERVICE).create({
           data: supplierData,
         });
-        console.log(`Supplier ${siigoId} creado localmente`);
+        logger.info(`Supplier ${siigoId} creado localmente`);
       }
 
       return localSupplier;
@@ -376,7 +377,7 @@ module.exports = ({ strapi }) => ({
 
   async syncAllFromSiigo() {
     try {
-      console.log("Sincronizando suppliers desde Siigo...");
+      logger.info("Sincronizando suppliers desde Siigo...");
 
       let allSuppliers = [];
       let page = 1;

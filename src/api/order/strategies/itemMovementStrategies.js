@@ -618,15 +618,6 @@ class TransformStrategy extends ItemMovementStrategy {
         );
       }
 
-      console.log(
-        "DEBUG: item in TransformStrategy.create",
-        JSON.stringify(item),
-      );
-      console.log(
-        "DEBUG: sourceConsumption",
-        JSON.stringify(sourceConsumption),
-      );
-
       const ADJUSTMENT =
         require("../../../utils/inventoryMovementTypes").ADJUSTMENT;
 
@@ -1377,6 +1368,21 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
 }
 
 /**
+ * Estrategia para órdenes de nacionalización (zona franca → bodega stock).
+ *
+ * Idéntica a TransferStrategy en comportamiento:
+ * - CREATE: reserva items en la bodega zona franca (sourceWarehouse)
+ * - UPDATE (COMPLETED): mueve items a la bodega stock (destinationWarehouse)
+ * - UPDATE (CANCELLED): revierte a la bodega zona franca
+ * - DELETE: devuelve items a la bodega zona franca y los deja AVAILABLE
+ *
+ * La validación de que sourceWarehouse.type === "freeTradeZone" y
+ * destinationWarehouse.type === "stock" ocurre en el servicio de orden,
+ * no aquí.
+ */
+class NationalizationStrategy extends TransferStrategy {}
+
+/**
  * Factory para obtener la estrategia correcta según el tipo de orden
  */
 class ItemMovementStrategyFactory {
@@ -1391,6 +1397,7 @@ class ItemMovementStrategyFactory {
       [ORDER_TYPES.ADJUSTMENT]: AdjustmentStrategy,
       [ORDER_TYPES.TRANSFORM]: TransformStrategy,
       [ORDER_TYPES.PARTIAL_INVOICE]: PartialInvoiceStrategy,
+      [ORDER_TYPES.NATIONALIZATION]: NationalizationStrategy,
     };
 
     const StrategyClass = strategies[orderType];

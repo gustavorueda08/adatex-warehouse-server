@@ -165,7 +165,6 @@ module.exports = createCoreController(
         const customerService = strapi.service(CUSTOMER_SERVICE);
         const { customerId } = ctx.params;
         const data = ctx.request.body;
-        console.log("DATOS", data);
         if (!customerId) {
           throw new Error("El id del cliente es requerido");
         }
@@ -221,9 +220,96 @@ module.exports = createCoreController(
         });
       }
     },
+    /**
+     * Retorna el balance de cuentas por cobrar y facturas pendientes para un cliente
+     * GET /api/customers/:customerId/accounts-receivable?year=2026&month_start=1&month_end=3
+     */
+    async getAccountsReceivable(ctx) {
+      try {
+        const { customerId } = ctx.params;
+        const { year, month_start, month_end } = ctx.query;
+
+        const customer = await strapi.entityService.findOne(CUSTOMER_SERVICE, customerId, {
+          fields: ["identification", "name", "lastName"],
+        });
+
+        if (!customer) return ctx.notFound("Cliente no encontrado");
+        if (!customer.identification) {
+          return ctx.badRequest("El cliente no tiene NIT/identificación registrado");
+        }
+
+        const arService = strapi.service("api::siigo.accounts-receivable");
+        const options = {};
+        if (year) options.year = parseInt(year);
+        if (month_start) options.month_start = parseInt(month_start);
+        if (month_end) options.month_end = parseInt(month_end);
+
+        const data = await arService.getCustomerAccountsReceivable(customer.identification, options);
+
+        return {
+          data: {
+            ...data,
+            customerName: `${customer.name || ""} ${customer.lastName || ""}`.trim(),
+          },
+          meta: {},
+        };
+      } catch (error) {
+        logger.error("Error al obtener cuentas por cobrar:", error);
+        return ctx.internalServerError(error.message);
+      }
+    },
+
+    /**
+     * Descarga el reporte de cuentas por cobrar de un cliente (Excel o PDF)
+     * GET /api/customers/:customerId/accounts-receivable/download?format=excel|pdf
+     */
+    async downloadCustomerAccountsReceivable(ctx) {
+      try {
+        const { customerId } = ctx.params;
+        const { format = "excel", year, month_start, month_end } = ctx.query;
+
+        const customer = await strapi.entityService.findOne(CUSTOMER_SERVICE, customerId, {
+          fields: ["identification", "name", "lastName"],
+        });
+
+        if (!customer) return ctx.notFound("Cliente no encontrado");
+        if (!customer.identification) return ctx.badRequest("El cliente no tiene identificación");
+
+        const arService = strapi.service("api::siigo.accounts-receivable");
+        const options = {};
+        if (year) options.year = parseInt(year);
+        if (month_start) options.month_start = parseInt(month_start);
+        if (month_end) options.month_end = parseInt(month_end);
+
+        const data = await arService.getCustomerAccountsReceivable(customer.identification, options);
+        const customerName = `${customer.name || ""} ${customer.lastName || ""}`.trim();
+        const reportData = { ...data, customerName };
+
+        let buffer, contentType, filename;
+
+        if (format === "pdf") {
+          buffer = await arService.generateCustomerPdfReport(reportData);
+          contentType = "application/pdf";
+          filename = `Cartera-${customer.identification}-${new Date().toISOString().slice(0, 10)}.pdf`;
+        } else {
+          buffer = await arService.generateCustomerExcelReport(reportData);
+          contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+          filename = `Cartera-${customer.identification}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+        }
+
+        ctx.set("Content-Type", contentType);
+        ctx.set("Content-Disposition", `attachment; filename="${filename}"`);
+        ctx.set("Content-Length", buffer.length);
+        ctx.body = buffer;
+      } catch (error) {
+        logger.error("Error generando descarga de cartera:", error);
+        return ctx.internalServerError(error.message);
+      }
+    },
+
     async triggerAnalytics(ctx) {
       try {
-        console.log("Analytics manual trigger requested");
+        logger.info("Analytics manual trigger requested");
         await strapi.service("api::customer.customer").calculateAnalytics();
         return { success: true };
       } catch (err) {

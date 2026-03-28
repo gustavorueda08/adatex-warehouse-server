@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const { TAX_SERVICE } = require("../../../utils/services");
 const { siigoFetch } = require("../utils/siigoFetch");
 
@@ -17,7 +18,7 @@ module.exports = ({ strapi }) => ({
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando listado de taxes desde Siigo");
+        logger.info("[TEST MODE] Simulando listado de taxes desde Siigo");
         return [
           {
             id: 13156,
@@ -60,7 +61,7 @@ module.exports = ({ strapi }) => ({
       }
 
       const taxes = await response.json();
-      console.log(`${taxes.length} taxes obtenidos desde Siigo`);
+      logger.info(`${taxes.length} taxes obtenidos desde Siigo`);
 
       return taxes;
     } catch (error) {
@@ -75,7 +76,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllFromSiigo() {
     try {
-      console.log("Iniciando sincronización de taxes desde Siigo...");
+      logger.info("Iniciando sincronización de taxes desde Siigo...");
 
       const siigoTaxes = await this.listFromSiigo();
 
@@ -122,7 +123,7 @@ module.exports = ({ strapi }) => ({
                 data: taxData,
               });
               updated++;
-              console.log(`Tax actualizado: ${taxData.name}`);
+              logger.info(`Tax actualizado: ${taxData.name}`);
             } else {
               skipped++;
             }
@@ -132,7 +133,7 @@ module.exports = ({ strapi }) => ({
               data: taxData,
             });
             created++;
-            console.log(`Tax creado: ${taxData.name}`);
+            logger.info(`Tax creado: ${taxData.name}`);
           }
         } catch (error) {
           console.error(
@@ -151,7 +152,7 @@ module.exports = ({ strapi }) => ({
         message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Sin cambios: ${skipped}`,
       };
 
-      console.log(result.message);
+      logger.info(result.message);
       return result;
     } catch (error) {
       console.error("Error al sincronizar taxes desde Siigo:", error.message);

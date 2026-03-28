@@ -16,14 +16,14 @@ module.exports = ({ strapi }) => ({
    */
   async syncFromSiigo(siigoId) {
     try {
-      console.log(`Sincronizando customer ${siigoId} desde Siigo...`);
+      logger.info(`Sincronizando customer ${siigoId} desde Siigo...`);
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       let siigoCustomer;
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando consulta de customer desde Siigo");
+        logger.info("[TEST MODE] Simulando consulta de customer desde Siigo");
         siigoCustomer = {
           id: siigoId,
           type: "Customer",
@@ -92,13 +92,13 @@ module.exports = ({ strapi }) => ({
           where: { id: existingCustomers[0].id },
           data: customerData,
         });
-        console.log(`Customer ${siigoId} actualizado localmente`);
+        logger.info(`Customer ${siigoId} actualizado localmente`);
       } else {
         // Crear nuevo usando db.query para evitar disparar lifecycles
         localCustomer = await strapi.db.query(CUSTOMER_SERVICE).create({
           data: customerData,
         });
-        console.log(`Customer ${siigoId} creado localmente`);
+        logger.info(`Customer ${siigoId} creado localmente`);
       }
 
       return localCustomer;
@@ -120,7 +120,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncToSiigo(customerId) {
     try {
-      console.log(`Sincronizando customer ${customerId} hacia Siigo...`);
+      logger.info(`Sincronizando customer ${customerId} hacia Siigo...`);
 
       // Obtener customer local
       const customer = await strapi.entityService.findOne(
@@ -158,7 +158,7 @@ module.exports = ({ strapi }) => ({
    */
   async createInSiigo(customerId) {
     try {
-      console.log(`Creando customer ${customerId} en Siigo...`);
+      logger.info(`Creando customer ${customerId} en Siigo...`);
 
       // Obtener customer local
       const customer = await strapi.entityService.findOne(
@@ -187,7 +187,7 @@ module.exports = ({ strapi }) => ({
       let siigoCustomer;
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando creación de customer en Siigo");
+        logger.info("[TEST MODE] Simulando creación de customer en Siigo");
         siigoCustomer = {
           id: "TEST-" + Date.now(),
           ...siigoCustomerData,
@@ -222,7 +222,7 @@ module.exports = ({ strapi }) => ({
         data: { siigoId: String(siigoCustomer.id) },
       });
 
-      console.log(
+      logger.info(
         `Customer ${customerId} creado en Siigo con ID: ${siigoCustomer.id}`
       );
 
@@ -248,7 +248,7 @@ module.exports = ({ strapi }) => ({
    */
   async updateInSiigo(customerId) {
     try {
-      console.log(`Actualizando customer ${customerId} en Siigo...`);
+      logger.info(`Actualizando customer ${customerId} en Siigo...`);
 
       // Obtener customer local
       const customer = await strapi.entityService.findOne(
@@ -277,7 +277,7 @@ module.exports = ({ strapi }) => ({
       let siigoCustomer;
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando actualización de customer en Siigo");
+        logger.info("[TEST MODE] Simulando actualización de customer en Siigo");
         siigoCustomer = {
           id: customer.siigoId,
           ...siigoCustomerData,
@@ -305,7 +305,7 @@ module.exports = ({ strapi }) => ({
         siigoCustomer = await response.json();
       }
 
-      console.log(
+      logger.info(
         `Customer ${customerId} actualizado en Siigo ID: ${customer.siigoId}`
       );
 
@@ -333,7 +333,7 @@ module.exports = ({ strapi }) => ({
    */
   async deleteInSiigo(customerId) {
     try {
-      console.log(`Eliminando customer ${customerId} en Siigo...`);
+      logger.info(`Eliminando customer ${customerId} en Siigo...`);
 
       // Obtener customer local
       const customer = await strapi.entityService.findOne(
@@ -354,7 +354,7 @@ module.exports = ({ strapi }) => ({
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando eliminación de customer en Siigo");
+        logger.info("[TEST MODE] Simulando eliminación de customer en Siigo");
       } else {
         // Siigo no permite DELETE, se marca como inactivo
         const authService = strapi.service("api::siigo.auth");
@@ -383,7 +383,7 @@ module.exports = ({ strapi }) => ({
         data: { isActive: false },
       });
 
-      console.log(
+      logger.info(
         `Customer ${customerId} marcado como inactivo en Siigo ID: ${customer.siigoId}`
       );
 
@@ -409,14 +409,14 @@ module.exports = ({ strapi }) => ({
    */
   async searchInSiigoByIdentification(identification) {
     try {
-      console.log(
+      logger.info(
         `Buscando customer en Siigo por identification: ${identification}...`
       );
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando búsqueda de customer en Siigo");
+        logger.info("[TEST MODE] Simulando búsqueda de customer en Siigo");
         // Simular que no se encuentra
         return null;
       }
@@ -435,7 +435,7 @@ module.exports = ({ strapi }) => ({
 
       if (!response.ok) {
         if (response.status === 404) {
-          console.log(
+          logger.info(
             `Customer con identification ${identification} no encontrado en Siigo`
           );
           return null;
@@ -450,14 +450,14 @@ module.exports = ({ strapi }) => ({
 
       // Si es un array, tomar el primer resultado
       if (Array.isArray(customers) && customers.length > 0) {
-        console.log(`Customer encontrado en Siigo con ID: ${customers[0].id}`);
+        logger.info(`Customer encontrado en Siigo con ID: ${customers[0].id}`);
         return customers[0];
       } else if (!Array.isArray(customers) && customers.id) {
-        console.log(`Customer encontrado en Siigo con ID: ${customers.id}`);
+        logger.info(`Customer encontrado en Siigo con ID: ${customers.id}`);
         return customers;
       }
 
-      console.log(
+      logger.info(
         `Customer con identification ${identification} no encontrado en Siigo`
       );
       return null;
@@ -480,14 +480,14 @@ module.exports = ({ strapi }) => ({
     try {
       const { page = 1, pageSize = 100 } = options;
 
-      console.log(
+      logger.info(
         `Listando customers desde Siigo (página ${page}, ${pageSize} por página)...`
       );
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando listado de customers desde Siigo");
+        logger.info("[TEST MODE] Simulando listado de customers desde Siigo");
         return [
           {
             id: "TEST-001",
@@ -525,7 +525,7 @@ module.exports = ({ strapi }) => ({
       const data = await response.json();
       const customers = data.results || data;
 
-      console.log(`${customers.length} customers obtenidos desde Siigo`);
+      logger.info(`${customers.length} customers obtenidos desde Siigo`);
 
       return customers;
     } catch (error) {
@@ -542,7 +542,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllFromSiigo() {
     try {
-      console.log(
+      logger.info(
         "Iniciando sincronización masiva de customers desde Siigo..."
       );
 
@@ -627,7 +627,7 @@ module.exports = ({ strapi }) => ({
         message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Fallidos: ${failed}`,
       };
 
-      console.log(result.message);
+      logger.info(result.message);
       return result;
     } catch (error) {
       console.error(
@@ -646,7 +646,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllToSiigo() {
     try {
-      console.log(
+      logger.info(
         "Iniciando sincronización masiva de customers hacia Siigo..."
       );
 
@@ -705,7 +705,7 @@ module.exports = ({ strapi }) => ({
         message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Fallidos: ${failed}`,
       };
 
-      console.log(result.message);
+      logger.info(result.message);
       return result;
     } catch (error) {
       console.error(

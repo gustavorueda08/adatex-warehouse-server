@@ -1,6 +1,16 @@
 module.exports = {
   routes: [
     {
+      path: "/customers/:customerId/accounts-receivable",
+      method: "GET",
+      handler: "customer.getAccountsReceivable",
+    },
+    {
+      path: "/customers/:customerId/accounts-receivable/download",
+      method: "GET",
+      handler: "customer.downloadCustomerAccountsReceivable",
+    },
+    {
       path: "/customers/:customerId/consignment-balance",
       method: "GET",
       handler: "customer.getConsignmentBalance",

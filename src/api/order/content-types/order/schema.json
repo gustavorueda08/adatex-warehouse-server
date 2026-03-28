@@ -27,7 +27,8 @@
         "return",
         "adjustment",
         "transform",
-        "partial-invoice"
+        "partial-invoice",
+        "nationalization"
       ]
     },
     "transformationFactor": {

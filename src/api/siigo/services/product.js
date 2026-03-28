@@ -1,5 +1,6 @@
 "use strict";
 
+const logger = require("../../../utils/logger");
 const { PRODUCT_SERVICE } = require("../../../utils/services");
 const productCategories = require("../../../utils/productCategories");
 const { siigoFetch } = require("../utils/siigoFetch");
@@ -16,7 +17,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncFromSiigo(siigoId) {
     try {
-      console.log(`Sincronizando product ${siigoId} desde Siigo...`);
+      logger.info(`Sincronizando product ${siigoId} desde Siigo...`);
 
       // Marcar en el contexto que estamos sincronizando desde Siigo para evitar bucles en lifecycles
       const ctx = strapi.requestContext.get();
@@ -29,7 +30,7 @@ module.exports = ({ strapi }) => ({
       let siigoProduct;
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando consulta de product desde Siigo");
+        logger.info("[TEST MODE] Simulando consulta de product desde Siigo");
         siigoProduct = {
           id: siigoId,
           code: "TEST-PROD-001",
@@ -78,12 +79,12 @@ module.exports = ({ strapi }) => ({
           where: { id: existingProducts[0].id },
           data: productData,
         });
-        console.log(`Product ${siigoId} actualizado localmente`);
+        logger.info(`Product ${siigoId} actualizado localmente`);
       } else {
         localProduct = await strapi.db.query(PRODUCT_SERVICE).create({
           data: productData,
         });
-        console.log(`Product ${siigoId} creado localmente`);
+        logger.info(`Product ${siigoId} creado localmente`);
       }
 
       return localProduct;
@@ -107,12 +108,12 @@ module.exports = ({ strapi }) => ({
             .replace(/[\s]+/g, "-")
             .replace(/[^\w-]/g, "")
         : code;
-      console.log(`Buscando product en Siigo por code: ${sanitizedCode}...`);
+      logger.info(`Buscando product en Siigo por code: ${sanitizedCode}...`);
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando búsqueda de product en Siigo");
+        logger.info("[TEST MODE] Simulando búsqueda de product en Siigo");
         return null;
       }
 
@@ -141,7 +142,7 @@ module.exports = ({ strapi }) => ({
         const data = await response.json();
         const products = data.results || data;
 
-        console.log(`[Siigo Search Debug] Result for ${sanitizedCode}:`, JSON.stringify(data, null, 2));
+        logger.debug(`[Siigo Search Debug] Result for ${sanitizedCode}:`, JSON.stringify(data, null, 2));
 
         if (Array.isArray(products) && products.length > 0) {
           const found = products.find((product) => {
@@ -160,7 +161,7 @@ module.exports = ({ strapi }) => ({
           });
 
           if (found) {
-            console.log(`Product encontrado en Siigo con ID: ${found.id}`);
+            logger.info(`Product encontrado en Siigo con ID: ${found.id}`);
             return found;
           }
         } else if (products && products.code != null) {
@@ -176,7 +177,7 @@ module.exports = ({ strapi }) => ({
             siigoCodeRaw === String(code || "") ||
             siigoCodeRaw.toUpperCase() === String(code || "").toUpperCase()
           ) {
-            console.log(`Product encontrado en Siigo con ID: ${products.id}`);
+            logger.info(`Product encontrado en Siigo con ID: ${products.id}`);
             return products;
           }
         }
@@ -196,7 +197,7 @@ module.exports = ({ strapi }) => ({
         page++;
       }
 
-      console.log(`Product con code ${code} no encontrado en Siigo`);
+      logger.info(`Product con code ${code} no encontrado en Siigo`);
       return null;
     } catch (error) {
       console.error(
@@ -214,7 +215,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncToSiigo(productId) {
     try {
-      console.log(`Sincronizando product ${productId} hacia Siigo...`);
+      logger.info(`Sincronizando product ${productId} hacia Siigo...`);
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
@@ -248,7 +249,7 @@ module.exports = ({ strapi }) => ({
    */
   async createInSiigo(productId) {
     try {
-      console.log(`Creando product ${productId} en Siigo...`);
+      logger.info(`Creando product ${productId} en Siigo...`);
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
@@ -273,7 +274,7 @@ module.exports = ({ strapi }) => ({
       let siigoProduct;
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando creación de product en Siigo");
+        logger.info("[TEST MODE] Simulando creación de product en Siigo");
         siigoProduct = {
           id: "TEST-" + Date.now(),
           ...siigoProductData,
@@ -307,7 +308,7 @@ module.exports = ({ strapi }) => ({
         data: { siigoId: String(siigoProduct.id) },
       });
 
-      console.log(
+      logger.info(
         `Product ${productId} creado en Siigo con ID: ${siigoProduct.id}`,
       );
 
@@ -333,7 +334,7 @@ module.exports = ({ strapi }) => ({
    */
   async updateInSiigo(productId) {
     try {
-      console.log(`Actualizando product ${productId} en Siigo...`);
+      logger.info(`Actualizando product ${productId} en Siigo...`);
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
@@ -358,7 +359,7 @@ module.exports = ({ strapi }) => ({
       let siigoProduct;
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando actualización de product en Siigo");
+        logger.info("[TEST MODE] Simulando actualización de product en Siigo");
         siigoProduct = {
           id: product.siigoId,
           ...siigoProductData,
@@ -386,7 +387,7 @@ module.exports = ({ strapi }) => ({
         siigoProduct = await response.json();
       }
 
-      console.log(
+      logger.info(
         `Product ${productId} actualizado en Siigo ID: ${product.siigoId}`,
       );
 
@@ -412,7 +413,7 @@ module.exports = ({ strapi }) => ({
    */
   async deleteInSiigo(productId) {
     try {
-      console.log(`Eliminando product ${productId} en Siigo...`);
+      logger.info(`Eliminando product ${productId} en Siigo...`);
 
       const product = await strapi.entityService.findOne(
         PRODUCT_SERVICE,
@@ -432,7 +433,7 @@ module.exports = ({ strapi }) => ({
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando eliminación de product en Siigo");
+        logger.info("[TEST MODE] Simulando eliminación de product en Siigo");
       } else {
         // Siigo no permite DELETE, se marca como inactivo
         const authService = strapi.service("api::siigo.auth");
@@ -461,7 +462,7 @@ module.exports = ({ strapi }) => ({
         data: { isActive: false },
       });
 
-      console.log(
+      logger.info(
         `Product ${productId} marcado como inactivo en Siigo ID: ${product.siigoId}`,
       );
 
@@ -489,14 +490,14 @@ module.exports = ({ strapi }) => ({
     try {
       const { page = 1, pageSize = 100 } = options;
 
-      console.log(
+      logger.info(
         `Listando products desde Siigo (página ${page}, ${pageSize} por página)...`,
       );
 
       const testMode = process.env.SIIGO_TEST_MODE === "true";
 
       if (testMode) {
-        console.log("[TEST MODE] Simulando listado de products desde Siigo");
+        logger.info("[TEST MODE] Simulando listado de products desde Siigo");
         return [
           {
             id: "TEST-P001",
@@ -536,7 +537,7 @@ module.exports = ({ strapi }) => ({
       const data = await response.json();
       const products = data.results || data;
 
-      console.log(`${products.length} products obtenidos desde Siigo`);
+      logger.info(`${products.length} products obtenidos desde Siigo`);
 
       return products;
     } catch (error) {
@@ -551,7 +552,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllFromSiigo() {
     try {
-      console.log("Iniciando sincronización masiva de products desde Siigo...");
+      logger.info("Iniciando sincronización masiva de products desde Siigo...");
 
       const allowedCategoryIds = new Set(
         productCategories.map((category) => String(category.id)),
@@ -598,7 +599,7 @@ module.exports = ({ strapi }) => ({
         try {
           const accountGroupId = siigoProduct?.account_group?.id;
           if (!allowedCategoryIds.has(String(accountGroupId))) {
-            console.log(
+            logger.info(
               `Product ${siigoProduct.id} omitido por account_group.id no permitido (${accountGroupId})`,
             );
             skipped++;
@@ -639,7 +640,7 @@ module.exports = ({ strapi }) => ({
         message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Saltados: ${skipped}, Fallidos: ${failed}`,
       };
 
-      console.log(result.message);
+      logger.info(result.message);
       return result;
     } catch (error) {
       console.error(
@@ -658,7 +659,7 @@ module.exports = ({ strapi }) => ({
    */
   async syncAllToSiigo() {
     try {
-      console.log("Iniciando sincronización masiva de products hacia Siigo...");
+      logger.info("Iniciando sincronización masiva de products hacia Siigo...");
 
       const localProducts = await strapi.entityService.findMany(
         PRODUCT_SERVICE,
@@ -712,7 +713,7 @@ module.exports = ({ strapi }) => ({
         message: `Sincronización completada. Creados: ${created}, Actualizados: ${updated}, Fallidos: ${failed}`,
       };
 
-      console.log(result.message);
+      logger.info(result.message);
       return result;
     } catch (error) {
       console.error(

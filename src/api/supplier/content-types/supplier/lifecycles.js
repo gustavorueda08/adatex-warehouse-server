@@ -7,6 +7,7 @@
 
 const { SUPPLIER_SERVICE } = require("../../../../utils/services");
 const formatName = require("../../../../utils/formatName");
+const logger = require("../../../../utils/logger");
 
 module.exports = {
   async beforeCreate(event) {
@@ -52,7 +53,7 @@ module.exports = {
             where: { id: result.id },
             data: { siigoId: String(existingSiigoSupplier.id) },
           });
-          console.log(
+          logger.info(
             `[Supplier Lifecycle] Supplier ${result.id} vinculado con Siigo ID ${existingSiigoSupplier.id}`
           );
           return;
