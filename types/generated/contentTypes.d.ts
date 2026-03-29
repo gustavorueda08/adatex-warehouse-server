@@ -1058,6 +1058,7 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
       'plugin::users-permissions.user'
     >;
     isActive: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    isLineProduct: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
     items: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<

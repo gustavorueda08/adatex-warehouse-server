@@ -538,7 +538,10 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
 
         let orderTotal = 0;
         for (const op of order.orderProducts || []) {
-          const qty = op.requestedQuantity || 0;
+          // Use confirmedQuantity as primary (set from actual items on completion);
+          // fall back to requestedQuantity for orders still in processing.
+          // partial-invoice orders have requestedQuantity=0 but confirmedQuantity set.
+          const qty = op.confirmedQuantity || op.requestedQuantity || 0;
           const price = op.price || 0;
           const lineTotal = (qty * price);
           orderTotal += lineTotal;
@@ -588,7 +591,7 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
 
         let orderTotal = 0;
         for (const op of order.orderProducts || []) {
-          const qty = op.requestedQuantity || 0;
+          const qty = op.confirmedQuantity || op.requestedQuantity || 0;
           const price = op.price || 0;
           orderTotal += (qty * price);
         }
@@ -660,12 +663,43 @@ module.exports = createCoreService("api::customer.customer", ({ strapi }) => ({
         updateData.lastPurchaseDate = lastPurchaseDate;
       }
 
-      if (customer.status === 'active' && isChurnRisk) {
-         updateData.status = 'at_risk';
-      } else if (customer.status === 'active' && monthlyVolume === 0 && threeMonthAverage > 0) {
-         updateData.status = 'churned'; 
-      } else if (monthlyVolume > 0 && (customer.status === 'at_risk' || customer.status === 'churned')) {
-         updateData.status = 'active';
+      // ── Status transitions ────────────────────────────────────────────────
+      //
+      // Rule 1: Customer bought in last 30 days → active (or at_risk if churn signal)
+      //         Applies to ALL statuses, including null and prospect.
+      if (monthlyVolume > 0) {
+        updateData.status = isChurnRisk ? 'at_risk' : 'active';
+
+      // Rule 2: Prospect with no recent purchases → never auto-change downward
+      //         (Rule 1 above handles the prospect→active promotion when they do buy)
+      } else if (customer.status === 'prospect') {
+        // no change
+
+      // Rule 3: Was active, no purchases in last 30 days
+      } else if (customer.status === 'active') {
+        if (month2Volume > 0 || month3Volume > 0) {
+          // Bought 31–90 days ago → at_risk (not churned yet)
+          updateData.status = 'at_risk';
+        } else {
+          // Zero purchases in 90 days → churned
+          updateData.status = 'churned';
+        }
+
+      // Rule 4: Was at_risk, still no purchase this month
+      } else if (customer.status === 'at_risk') {
+        if (month2Volume === 0 && month3Volume === 0) {
+          // No activity in 90 days → churned
+          updateData.status = 'churned';
+        }
+        // else: still had some activity in 31–90 days → keep at_risk
+
+      // Rule 5: Unclassified (null) or already churned — only reclassify if
+      //         there's recent-ish activity (31–90 days ago).
+      } else if (!customer.status || customer.status === 'churned') {
+        if (month2Volume > 0 || month3Volume > 0) {
+          updateData.status = 'at_risk';
+        }
+        // else: no activity at all → leave unchanged
       }
 
       await strapi.db.query("api::customer.customer").update({

@@ -94,6 +94,10 @@
         "service"
       ]
     },
+    "isLineProduct": {
+      "type": "boolean",
+      "default": true
+    },
     "productsForCuts": {
       "type": "relation",
       "relation": "oneToMany",
