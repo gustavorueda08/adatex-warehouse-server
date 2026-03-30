@@ -254,17 +254,17 @@ module.exports = ({ strapi }) => ({
       logger.debug("================================");
 
       // Calcular fecha de vencimiento según términos de pago
+      // Always use Bogota timezone for invoice dates
+      const bogotaNow = moment().tz("America/Bogota");
       const paymentTermsDays = customer.paymentTerms || 0;
-      const dueDate = moment()
-        .add(paymentTermsDays, "days")
-        .format("YYYY-MM-DD");
+      const dueDate = bogotaNow.clone().add(paymentTermsDays, "days").format("YYYY-MM-DD");
 
       // Construir objeto de factura en formato Siigo
       const invoice = {
         document: {
           id: documentType, // 1 = tipo A (electrónica), 2 = tipo B (normal)
         },
-        date: moment().format("YYYY-MM-DD"),
+        date: bogotaNow.format("YYYY-MM-DD"),
         customer: {
           identification: customer.identification,
         },

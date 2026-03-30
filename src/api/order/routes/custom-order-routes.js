@@ -51,6 +51,11 @@ module.exports = {
       handler: "order.createNationalization",
     },
     {
+      path: "/orders/:orderId/approve-credit",
+      method: "POST",
+      handler: "order.approveCreditOverride",
+    },
+    {
       method: "POST",
       path: "/orders/test-email",
       handler: "order.testEmail",

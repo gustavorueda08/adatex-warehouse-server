@@ -28,6 +28,12 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       };
     } catch (error) {
       logger.error("Error al crear orden:", error);
+      if (error.message?.startsWith("CREDIT_BLOCK:")) {
+        const reason = error.message.slice("CREDIT_BLOCK:".length);
+        return ctx.badRequest(reason, {
+          error: { status: 400, name: "CreditBlockError", message: reason },
+        });
+      }
       return ctx.internalServerError(error.message, {
         error: {
           status: 500,
@@ -71,6 +77,12 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
       };
     } catch (error) {
       logger.error("Error al actualizar la orden:", error);
+      if (error.message?.startsWith("CREDIT_BLOCK:")) {
+        const reason = error.message.slice("CREDIT_BLOCK:".length);
+        return ctx.badRequest(reason, {
+          error: { status: 400, name: "CreditBlockError", message: reason },
+        });
+      }
       return ctx.internalServerError(error.message, {
         error: {
           status: 500,
@@ -437,6 +449,52 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
           details: process.env.NODE_ENV !== "production" ? error : undefined,
         },
       });
+    }
+  },
+
+  /**
+   * Aprueba o revoca la excepción de bloqueo de crédito para una orden de venta.
+   * Solo administradores pueden llamar este endpoint.
+   * POST /api/orders/:orderId/approve-credit
+   * Body: { override: true|false }  (default: true)
+   */
+  async approveCreditOverride(ctx) {
+    try {
+      if (!ctx.state.user || ctx.state.user.type !== "admin") {
+        return ctx.forbidden("Solo los administradores pueden aprobar excepciones de crédito");
+      }
+
+      const { orderId } = ctx.params;
+      const override = ctx.request.body?.override !== false; // default true
+
+      const order = await strapi.entityService.findOne("api::order.order", orderId, {
+        fields: ["id", "type", "state", "code"],
+      });
+
+      if (!order) return ctx.notFound("Orden no encontrada");
+      if (order.type !== "sale") {
+        return ctx.badRequest("Solo las órdenes de venta pueden tener excepción de crédito");
+      }
+
+      await strapi.entityService.update("api::order.order", orderId, {
+        data: { creditBlockOverridden: override },
+      });
+
+      logger.info(
+        `Admin ${ctx.state.user.username || ctx.state.user.email || ctx.state.user.id} ${override ? "aprobó" : "revocó"} excepción de crédito para orden ${order.code}`,
+      );
+
+      return {
+        data: { id: Number(orderId), creditBlockOverridden: override },
+        meta: {
+          message: override
+            ? "Excepción de crédito aprobada. El equipo de bodega puede despachar esta orden."
+            : "Excepción de crédito revocada.",
+        },
+      };
+    } catch (error) {
+      logger.error("Error al gestionar excepción de crédito:", error);
+      return ctx.internalServerError(error.message);
     }
   },
 

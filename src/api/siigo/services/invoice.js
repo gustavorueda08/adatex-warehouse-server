@@ -19,15 +19,20 @@ module.exports = ({ strapi }) => ({
   async createInvoiceForOrder(orderId, options = {}) {
     try {
       // Obtener la orden con todos los datos necesarios
+      // Using object populate syntax to guarantee all scalar fields (incl. paymentTerms)
+      // are returned alongside nested relations.
       const order = await strapi.entityService.findOne(ORDER_SERVICE, orderId, {
-        populate: [
-          "customerForInvoice",
-          "customerForInvoice.taxes",
-          "orderProducts",
-          "orderProducts.product",
-          "customer",
-          "customer.seller",
-        ],
+        populate: {
+          customerForInvoice: {
+            populate: { taxes: true },
+          },
+          customer: {
+            populate: { seller: true },
+          },
+          orderProducts: {
+            populate: { product: true },
+          },
+        },
       });
 
       if (!order) {

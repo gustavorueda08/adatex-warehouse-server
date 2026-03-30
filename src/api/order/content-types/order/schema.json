@@ -187,6 +187,10 @@
       "type": "boolean",
       "default": false
     },
+    "creditBlockOverridden": {
+      "type": "boolean",
+      "default": false
+    },
     "items": {
       "type": "relation",
       "relation": "manyToMany",

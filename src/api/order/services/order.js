@@ -12,6 +12,7 @@ const {
   ITEM_SERVICE,
   PRODUCT_SERVICE,
   ORDER_SERVICE,
+  CUSTOMER_SERVICE,
 } = require("../../../utils/services");
 
 const { withValidation } = require("../../../validation/withValidation");
@@ -37,6 +38,134 @@ const {
 const {
   ItemMovementStrategyFactory,
 } = require("../strategies/itemMovementStrategies");
+
+const COP_FMT = new Intl.NumberFormat("es-CO", {
+  style: "currency",
+  currency: "COP",
+  maximumFractionDigits: 0,
+});
+
+/**
+ * Determina si una factura de Siigo está vencida aplicando la regla de plazo global:
+ *
+ *   días_efectivos = max(plazo_global_cliente, días_propios_de_la_factura)
+ *
+ * "días_propios_de_la_factura" se deriva de (due_date − date). Si la factura
+ * tiene un plazo propio MAYOR al global, se usa el propio (favor del cliente).
+ * Si el plazo propio es MENOR, prevalece el global.
+ *
+ * Si la factura no trae 'date', se cae en el due_date de Siigo como respaldo.
+ *
+ * @param {object} inv  Factura de Siigo { date?, due_date?, balance }
+ * @param {number} globalPaymentTerms  Plazo global del cliente en días.
+ * @returns {boolean}
+ */
+function isInvoiceOverdue(inv, globalPaymentTerms) {
+  const todayMs = Date.now();
+
+  if (!inv.date) {
+    // Sin fecha de emisión: usar due_date de Siigo directamente
+    return inv.due_date ? new Date(inv.due_date).getTime() < todayMs : false;
+  }
+
+  const invoiceDateMs = new Date(inv.date).getTime();
+  const siigoDueDateMs = inv.due_date ? new Date(inv.due_date).getTime() : 0;
+
+  // Plazo propio de la factura (días entre emisión y vencimiento en Siigo)
+  const invoiceSpecificDays =
+    siigoDueDateMs > invoiceDateMs
+      ? Math.round((siigoDueDateMs - invoiceDateMs) / 86400000)
+      : 0;
+
+  // El plazo efectivo es el mayor: global del cliente o el propio de la factura
+  const effectiveDays = Math.max(globalPaymentTerms || 0, invoiceSpecificDays);
+
+  return todayMs > invoiceDateMs + effectiveDays * 86400000;
+}
+
+/**
+ * Verifica si un cliente tiene el cupo bloqueado antes de confirmar o despachar.
+ *
+ * Reglas:
+ *  1. isBlocked = true  → siempre bloqueado (sin llamar a Siigo).
+ *  2. creditLimit = 0   → cliente de contado; nunca se bloquea.
+ *  3. creditLimit > 0   → verificar en Siigo:
+ *       a. Facturas vencidas según plazo GLOBAL del cliente (ver isInvoiceOverdue).
+ *       b. (saldo_pendiente + orderValue) > creditLimit → bloquear.
+ *  4. Si Siigo no responde → advertencia en log y se permite la operación
+ *     (las fallas técnicas de Siigo no deben detener el negocio).
+ *
+ * @param {object} strapi
+ * @param {number} customerId
+ * @param {object} [opts]
+ * @param {number} [opts.orderValue=0]  Valor de la orden en curso (para el chequeo en despacho).
+ * @returns {Promise<{ blocked: boolean, reason?: string }>}
+ */
+async function checkCustomerCreditBlock(strapi, customerId, { orderValue = 0 } = {}) {
+  const customer = await strapi.entityService.findOne(CUSTOMER_SERVICE, customerId, {
+    fields: ["id", "name", "creditLimit", "identification", "isBlocked", "paymentTerms"],
+  });
+
+  if (!customer) {
+    return { blocked: true, reason: "Cliente no encontrado." };
+  }
+
+  // Bloqueo manual — prioridad máxima, sin consulta a Siigo
+  if (customer.isBlocked) {
+    return {
+      blocked: true,
+      reason: `El cliente "${customer.name}" está bloqueado. Contacte el área de cartera.`,
+    };
+  }
+
+  // creditLimit = 0 → cliente de contado, nunca se bloquea
+  if (!customer.creditLimit || customer.creditLimit <= 0) {
+    return { blocked: false };
+  }
+
+  // Cliente con cupo asignado: verificar cartera en Siigo
+  try {
+    const arService = strapi.service("api::siigo.accounts-receivable");
+    const ar = await arService.getCustomerAccountsReceivable(customer.identification);
+
+    const globalPaymentTerms = customer.paymentTerms || 0;
+
+    // a) Facturas vencidas según plazo global del cliente
+    const overdueInvoices = (ar.invoices || []).filter((inv) =>
+      isInvoiceOverdue(inv, globalPaymentTerms),
+    );
+
+    if (overdueInvoices.length > 0) {
+      const totalOverdue = overdueInvoices.reduce((sum, inv) => sum + (inv.balance || 0), 0);
+      return {
+        blocked: true,
+        reason: `El cliente tiene ${overdueInvoices.length} factura(s) vencida(s) por ${COP_FMT.format(totalOverdue)}. Regularice la cartera para continuar.`,
+      };
+    }
+
+    // b) Saldo actual + valor de la orden actual vs cupo
+    const pendingBalance = ar.balance?.saldo_final || 0;
+    const effectiveBalance = pendingBalance + orderValue;
+
+    if (effectiveBalance > customer.creditLimit) {
+      const detail =
+        orderValue > 0
+          ? `Saldo actual ${COP_FMT.format(pendingBalance)} + esta orden ${COP_FMT.format(orderValue)} = ${COP_FMT.format(effectiveBalance)} / Cupo: ${COP_FMT.format(customer.creditLimit)}.`
+          : `Saldo pendiente: ${COP_FMT.format(pendingBalance)} / Cupo: ${COP_FMT.format(customer.creditLimit)}.`;
+      return {
+        blocked: true,
+        reason: `El cliente superó su cupo de crédito. ${detail}`,
+      };
+    }
+
+    return { blocked: false };
+  } catch (err) {
+    logger.warn(
+      `No se pudo verificar cupo en Siigo para cliente ${customerId}: ${err.message}`,
+    );
+    return { blocked: false };
+  }
+}
 
 /**
  * Order service - Versión optimizada y refactorizada
@@ -81,6 +210,18 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           ) {
             orderData.customerForInvoice =
               validation.parentOrder.customerForInvoice.id;
+          }
+        }
+
+        // Verificación de cupo al crear una venta directamente como confirmada
+        if (
+          data.type === ORDER_TYPES.SALE &&
+          data.customer &&
+          data.state === ORDER_STATES.CONFIRMED
+        ) {
+          const creditCheck = await checkCustomerCreditBlock(strapi, data.customer);
+          if (creditCheck.blocked) {
+            throw new Error(`CREDIT_BLOCK:${creditCheck.reason}`);
           }
         }
 
@@ -187,6 +328,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "orderProducts.product",
               "destinationWarehouse",
               "sourceWarehouse",
+              "customer",
             ],
             transacting: trx,
           },
@@ -198,6 +340,40 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         // Validar que la orden pueda ser editada
         validateOrderIsEditable(currentOrder);
+
+        // Verificación de cupo al confirmar una orden de venta (DRAFT → CONFIRMED)
+        if (
+          update?.state === ORDER_STATES.CONFIRMED &&
+          currentOrder.state === ORDER_STATES.DRAFT &&
+          currentOrder.type === ORDER_TYPES.SALE &&
+          currentOrder.customer?.id &&
+          !currentOrder.creditBlockOverridden
+        ) {
+          const creditCheck = await checkCustomerCreditBlock(strapi, currentOrder.customer.id);
+          if (creditCheck.blocked) {
+            throw new Error(`CREDIT_BLOCK:${creditCheck.reason}`);
+          }
+        }
+
+        // Verificación de cupo al despachar una orden de venta (→ COMPLETED)
+        // addItem / removeItem no pasan por aquí, así que nunca se bloquean.
+        if (
+          update?.state === ORDER_STATES.COMPLETED &&
+          currentOrder.state !== ORDER_STATES.COMPLETED &&
+          currentOrder.type === ORDER_TYPES.SALE &&
+          currentOrder.customer?.id &&
+          !currentOrder.creditBlockOverridden
+        ) {
+          const orderValue = (currentOrder.orderProducts || []).reduce((sum, op) => {
+            return sum + (parseFloat(op.price) || 0) * (parseFloat(op.confirmedQuantity) || 0);
+          }, 0);
+          const creditCheck = await checkCustomerCreditBlock(strapi, currentOrder.customer.id, {
+            orderValue,
+          });
+          if (creditCheck.blocked) {
+            throw new Error(`CREDIT_BLOCK:${creditCheck.reason}`);
+          }
+        }
 
         // Obtener el nuevo estado del Order si llega, o tomar el estado actual
         const orderState = update?.state || currentOrder.state;

@@ -909,6 +909,8 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     createdDate: Schema.Attribute.DateTime;
+    creditBlockOverridden: Schema.Attribute.Boolean &
+      Schema.Attribute.DefaultTo<false>;
     currency: Schema.Attribute.Enumeration<['USD', 'EUR', 'COP']> &
       Schema.Attribute.DefaultTo<'USD'>;
     customer: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;

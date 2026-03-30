@@ -230,7 +230,7 @@ module.exports = createCoreController(
         const { year, month_start, month_end } = ctx.query;
 
         const customer = await strapi.entityService.findOne(CUSTOMER_SERVICE, customerId, {
-          fields: ["identification", "name", "lastName"],
+          fields: ["identification", "name", "lastName", "paymentTerms", "creditLimit"],
         });
 
         if (!customer) return ctx.notFound("Cliente no encontrado");
@@ -250,6 +250,8 @@ module.exports = createCoreController(
           data: {
             ...data,
             customerName: `${customer.name || ""} ${customer.lastName || ""}`.trim(),
+            paymentTerms: customer.paymentTerms || 0,
+            creditLimit: customer.creditLimit || 0,
           },
           meta: {},
         };
