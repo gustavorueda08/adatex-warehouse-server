@@ -81,7 +81,7 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
           barcode: barcode,
           state: justAvailableItems
             ? ITEM_STATES.AVAILABLE
-            : [Object.values(ITEM_STATES)],
+            : Object.values(ITEM_STATES),
         },
         populate: [
           "product",
@@ -426,8 +426,8 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
             currentItem.state === ITEM_STATES.RESERVED &&
             updatedItem.state === ITEM_STATES.AVAILABLE
           ) {
-            // Se completó la transferencia (AVAILABLE a AVAILABLE pero en otra bodega se maneja en el warehouseChange)
-            // Solo creamos un UNRESERVE aquí para limpiar la reserva.
+            // Se completó la transferencia: el cambio de bodega
+            // se registra en warehouseChange; aquí solo liberamos la reserva.
             return {
               ...baseMovement,
               type: UNRESERVE,
@@ -435,6 +435,11 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
             };
           }
         }
+        return null;
+
+      case ORDER_TYPES.NATIONALIZATION:
+        // Los items de nacionalización siempre están disponibles (nunca se reservan).
+        // El cambio de bodega se registra en bulkMoveItemsToWarehouse.
         return null;
 
       default:

@@ -250,10 +250,17 @@ class ReturnStrategy extends ItemMovementStrategy {
   }
 
   async update({ item, order, orderProduct, trx, orderState, orderType }) {
+    // Si la devolución se cancela, el item debe volver a su estado anterior (sold).
+    // En cualquier otro caso (draft, confirmed, completed) el item queda disponible.
+    const itemState =
+      orderState === ORDER_STATES.CANCELLED
+        ? ITEM_STATES.SOLD
+        : ITEM_STATES.AVAILABLE;
+
     return await this.itemService.update({
       id: item.id,
       update: {
-        state: ITEM_STATES.AVAILABLE,
+        state: itemState,
         order: order.id,
         orderProduct: orderProduct.id,
       },
@@ -1028,6 +1035,21 @@ class TransformStrategy extends ItemMovementStrategy {
     }
 
     // 1 & 2. Restaurar cantidades y crear movimientos
+    // Pre-fetch de todos los adjustment movements en una sola consulta para evitar N+1
+    const { ADJUSTMENT } = require("../../../utils/inventoryMovementTypes");
+    const sourceIds = sourceItemsConsumedMap.map((sc) => sc.id).filter(Boolean);
+    const allAdjustmentMovements = sourceIds.length > 0
+      ? await strapi.entityService.findMany(INVENTORY_MOVEMENT_SERVICE, {
+          filters: {
+            item: { id: { $in: sourceIds } },
+            order: order?.id,
+            orderProduct: orderProduct?.id,
+            type: ADJUSTMENT,
+          },
+          ...(trx ? { transacting: trx } : {}),
+        })
+      : [];
+
     for (const sourceConsumption of sourceItemsConsumedMap) {
       const sourceItem = await strapi.db.query(ITEM_SERVICE).findOne({
         where: { id: sourceConsumption.id },
@@ -1075,19 +1097,9 @@ class TransformStrategy extends ItemMovementStrategy {
         { transacting: trx },
       );
 
-      // Check for any ADJUSTMENT movement created during the forced negative stock
-      const { ADJUSTMENT } = require("../../../utils/inventoryMovementTypes");
-      const adjustmentMovements = await strapi.entityService.findMany(
-        INVENTORY_MOVEMENT_SERVICE,
-        {
-          filters: {
-            item: sourceItem.id,
-            order: order?.id,
-            orderProduct: orderProduct?.id,
-            type: ADJUSTMENT,
-          },
-          ...(trx ? { transacting: trx } : {}),
-        },
+      // Filtrar los adjustments de este source item desde el batch pre-fetched
+      const adjustmentMovements = allAdjustmentMovements.filter(
+        (m) => (m.item?.id ?? m.item) === sourceItem.id,
       );
 
       // Revertir the adjustment if one was found
@@ -1380,7 +1392,36 @@ class PartialInvoiceStrategy extends ItemMovementStrategy {
  * destinationWarehouse.type === "stock" ocurre en el servicio de orden,
  * no aquí.
  */
-class NationalizationStrategy extends TransferStrategy {}
+class NationalizationStrategy extends TransferStrategy {
+  async create({ item, order, orderProduct, trx, orderType }) {
+    // Los items de nacionalización nunca se reservan — permanecen disponibles
+    return await this.itemService.update({
+      id: item.id,
+      update: {
+        state: ITEM_STATES.AVAILABLE,
+        order: order.id,
+        orderProduct: orderProduct.id,
+      },
+      type: orderType,
+      trx,
+    });
+  }
+
+  async update({ item, order, orderProduct, trx, orderType }) {
+    // Los items siempre están disponibles, independientemente del estado de la orden
+    return await this.itemService.update({
+      id: item.id,
+      update: {
+        state: ITEM_STATES.AVAILABLE,
+        order: order.id,
+        orderProduct: orderProduct.id,
+      },
+      type: orderType,
+      trx,
+    });
+  }
+  // delete() heredado de TransferStrategy: restaura sourceWarehouse + AVAILABLE — correcto
+}
 
 /**
  * Factory para obtener la estrategia correcta según el tipo de orden

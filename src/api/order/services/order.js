@@ -265,7 +265,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
                       orderState: order.state,
                       trx,
                     }),
-                  1,
+                  5,
                 );
               }
 

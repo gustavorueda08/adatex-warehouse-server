@@ -184,19 +184,25 @@ async function validatePartialInvoiceOrder(orderData, options = {}) {
     if (!customerId) {
       errors.push("No se pudo determinar el cliente para validar los items");
     } else {
+      // Fetch de todos los items en una sola consulta para evitar N+1
+      const allItemIds = orderData.products
+        .flatMap((p) => (p.items || []).map((i) => i.id))
+        .filter(Boolean);
+      const itemsById = new Map();
+      if (allItemIds.length > 0) {
+        const fetchedItems = await strapi.entityService.findMany(ITEM_SERVICE, {
+          filters: { id: { $in: allItemIds } },
+          populate: ["orders", "orders.customer"],
+          transacting: trx,
+        });
+        fetchedItems.forEach((item) => itemsById.set(item.id, item));
+      }
+
       for (const productData of orderData.products) {
         if (productData.items && Array.isArray(productData.items)) {
           for (const itemData of productData.items) {
             if (itemData.id) {
-              // Verificar que el item exista y sea válido para facturar
-              const item = await strapi.entityService.findOne(
-                ITEM_SERVICE,
-                itemData.id,
-                {
-                  populate: ["orders", "orders.customer"], // Necesitamos ver las órdenes para confirmar el cliente
-                  transacting: trx,
-                },
-              );
+              const item = itemsById.get(itemData.id);
 
               if (!item) {
                 errors.push(`El item ${itemData.id} no existe`);
@@ -368,19 +374,14 @@ async function markItemsAsInvoiced(itemIds, options = {}) {
   const moment = require("moment-timezone");
   moment.tz.setDefault("America/Bogota");
 
-  // Actualizar todos los items en batch
-  await Promise.all(
-    itemIds.map((itemId) =>
-      strapi.entityService.update(ITEM_SERVICE, itemId, {
-        data: {
-          isInvoiced: true,
-          invoicedDate: moment(invoicedDate).toDate(),
-          warehouse: null, // Remover warehouse cuando se factura (salida definitiva)
-        },
-        transacting: trx,
-      }),
-    ),
-  );
+  // Bulk update usando Knex directo para evitar N+1 dentro de la transacción
+  const knex = trx?.trx ?? trx ?? strapi.db.connection;
+  const now = new Date();
+  await knex("items")
+    .whereIn("id", itemIds)
+    .update({ is_invoiced: true, invoiced_date: moment(invoicedDate).toDate(), updated_at: now });
+  // Remover warehouse cuando se factura (salida definitiva)
+  await knex("items_warehouse_lnk").whereIn("item_id", itemIds).delete();
 }
 
 /**
@@ -396,18 +397,11 @@ async function unmarkItemsAsInvoiced(itemIds, options = {}) {
     return;
   }
 
-  // Actualizar todos los items en batch
-  await Promise.all(
-    itemIds.map((itemId) =>
-      strapi.entityService.update(ITEM_SERVICE, itemId, {
-        data: {
-          isInvoiced: false,
-          invoicedDate: null,
-        },
-        transacting: trx,
-      }),
-    ),
-  );
+  // Bulk update usando Knex directo para evitar N+1 dentro de la transacción
+  const knex = trx?.trx ?? trx ?? strapi.db.connection;
+  await knex("items")
+    .whereIn("id", itemIds)
+    .update({ is_invoiced: false, invoiced_date: null, updated_at: new Date() });
 }
 
 async function splitOrderForInvoices(order) {

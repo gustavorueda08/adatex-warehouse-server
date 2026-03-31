@@ -184,13 +184,13 @@ const bulkMoveItemsToWarehouse = async (
   const now = new Date();
   const newWarehouseId = Number(newWarehouse.id);
 
-  // Para transfer/nationalización: el estado del item depende del estado de la orden.
+  // Nacionalización: items siempre disponibles (no se reservan, solo cambian de bodega).
+  // Transferencia: RESERVED mientras está pendiente, AVAILABLE al completar/cancelar.
   // Purchase: los items ya son "available" desde su creación, no necesitan cambio de estado.
-  const isTransferType = [ORDER_TYPES.TRANSFER, ORDER_TYPES.NATIONALIZATION].includes(
-    currentOrder.type,
-  );
   let newItemState = null;
-  if (isTransferType) {
+  if (currentOrder.type === ORDER_TYPES.NATIONALIZATION) {
+    newItemState = ITEM_STATES.AVAILABLE;
+  } else if (currentOrder.type === ORDER_TYPES.TRANSFER) {
     newItemState =
       orderState === ORDER_STATES.COMPLETED || orderState === ORDER_STATES.CANCELLED
         ? ITEM_STATES.AVAILABLE
@@ -234,7 +234,7 @@ const bulkMoveItemsToWarehouse = async (
     }
   }
 
-  // ── 2. Actualizar costo (columna directa en items) ────────────────────────
+  // ── 3. Actualizar costo (columna directa en items) ────────────────────────
   if (itemsCostMap && itemsCostMap.size > 0) {
     // Agrupar por valor de costo para minimizar queries
     const byCost = new Map();
