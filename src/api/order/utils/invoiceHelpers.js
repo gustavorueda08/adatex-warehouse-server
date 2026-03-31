@@ -373,15 +373,29 @@ async function markItemsAsInvoiced(itemIds, options = {}) {
 
   const moment = require("moment-timezone");
   moment.tz.setDefault("America/Bogota");
-
-  // Bulk update usando Knex directo para evitar N+1 dentro de la transacción
-  const knex = trx?.trx ?? trx ?? strapi.db.connection;
+  const invoicedDateVal = moment(invoicedDate).toDate();
   const now = new Date();
-  await knex("items")
-    .whereIn("id", itemIds)
-    .update({ is_invoiced: true, invoiced_date: moment(invoicedDate).toDate(), updated_at: now });
-  // Remover warehouse cuando se factura (salida definitiva)
-  await knex("items_warehouse_lnk").whereIn("item_id", itemIds).delete();
+
+  if (trx) {
+    // Con transacción explícita: bulk Knex para evitar N+1
+    // Strapi 5 pasa callbackParams { trx: knexTrx, ... }; extraer la instancia Knex real
+    const knex = trx?.trx ?? trx;
+    await knex("items")
+      .whereIn("id", itemIds)
+      .update({ is_invoiced: true, invoiced_date: invoicedDateVal, updated_at: now });
+    // Remover warehouse cuando se factura (salida definitiva)
+    await knex("items_warehouse_lnk").whereIn("item_id", itemIds).delete();
+  } else {
+    // Sin transacción explícita: entityService respeta el contexto async de Strapi
+    // (necesario cuando se llama desde afterUpdate lifecycle para evitar deadlock en SQLite)
+    await Promise.all(
+      itemIds.map((itemId) =>
+        strapi.entityService.update(ITEM_SERVICE, itemId, {
+          data: { isInvoiced: true, invoicedDate: invoicedDateVal, warehouse: null },
+        }),
+      ),
+    );
+  }
 }
 
 /**
@@ -397,11 +411,22 @@ async function unmarkItemsAsInvoiced(itemIds, options = {}) {
     return;
   }
 
-  // Bulk update usando Knex directo para evitar N+1 dentro de la transacción
-  const knex = trx?.trx ?? trx ?? strapi.db.connection;
-  await knex("items")
-    .whereIn("id", itemIds)
-    .update({ is_invoiced: false, invoiced_date: null, updated_at: new Date() });
+  if (trx) {
+    // Con transacción explícita: bulk Knex para evitar N+1
+    const knex = trx?.trx ?? trx;
+    await knex("items")
+      .whereIn("id", itemIds)
+      .update({ is_invoiced: false, invoiced_date: null, updated_at: new Date() });
+  } else {
+    // Sin transacción explícita: entityService respeta el contexto async de Strapi
+    await Promise.all(
+      itemIds.map((itemId) =>
+        strapi.entityService.update(ITEM_SERVICE, itemId, {
+          data: { isInvoiced: false, invoicedDate: null },
+        }),
+      ),
+    );
+  }
 }
 
 async function splitOrderForInvoices(order) {
