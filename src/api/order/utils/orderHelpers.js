@@ -145,6 +145,7 @@ const ORDER_POPULATE_BASIC = [
 // Importaciones adicionales para las funciones auxiliares
 const runInBatches = require("../../../utils/runInBatches");
 const ITEM_MOVEMENT_TYPES = require("../../../utils/itemMovementTypes");
+const INVENTORY_MOVEMENT_TYPES = require("../../../utils/inventoryMovementTypes");
 const logger = require("../../../utils/logger");
 const {
   ORDER_PRODUCT_SERVICE,
@@ -152,6 +153,182 @@ const {
   WAREHOUSE_SERVICE,
   ORDER_SERVICE,
 } = require("../../../utils/services");
+
+/**
+ * Mueve un conjunto de items a una nueva bodega en bulk.
+ *
+ * Strapi 5 guarda las relaciones en tablas de enlace (_lnk), no como columnas FK.
+ * Por eso no podemos usar un UPDATE simple — necesitamos operar sobre esas tablas
+ * directamente con Knex. Esto reemplaza N × (UPDATE item + INSERT movement) con
+ * ~10 queries totales sin importar cuántos items haya.
+ *
+ * @param {object} strapi
+ * @param {object[]} items        - Items actuales (con warehouse populado)
+ * @param {object}  newWarehouse  - Entidad bodega destino
+ * @param {object}  currentOrder  - Orden actual (con orderProducts.items)
+ * @param {Map}     itemsCostMap  - Map<itemId, cost> o null
+ * @param {object}  trx           - Objeto de transacción de Strapi ({ trx: knexTrx, ... })
+ * @param {string}  orderState    - Estado al que transiciona la orden (e.g. "completed")
+ */
+const bulkMoveItemsToWarehouse = async (
+  strapi,
+  { items, newWarehouse, currentOrder, itemsCostMap, trx, orderState },
+) => {
+  if (!items.length || !newWarehouse) return;
+
+  const ITEM_STATES = require("../../../utils/itemStates");
+
+  // Strapi 5: strapi.db.transaction() pasa callbackParams = { trx: knexTrx, commit, rollback, ... }
+  // El objeto Knex real (callable como query builder) está en trx.trx
+  const knexTrx = trx?.trx ?? trx;
+  const now = new Date();
+  const newWarehouseId = Number(newWarehouse.id);
+
+  // Para transfer/nationalización: el estado del item depende del estado de la orden.
+  // Purchase: los items ya son "available" desde su creación, no necesitan cambio de estado.
+  const isTransferType = [ORDER_TYPES.TRANSFER, ORDER_TYPES.NATIONALIZATION].includes(
+    currentOrder.type,
+  );
+  let newItemState = null;
+  if (isTransferType) {
+    newItemState =
+      orderState === ORDER_STATES.COMPLETED || orderState === ORDER_STATES.CANCELLED
+        ? ITEM_STATES.AVAILABLE
+        : ITEM_STATES.RESERVED;
+  }
+
+  const allItemIds = items.map((i) => i.id);
+  const changing = items.filter(
+    (i) => String(i.warehouse?.id) !== String(newWarehouseId),
+  );
+
+  // ── 1. Actualizar estado del item (transfer/nationalización) ──────────────
+  // Se actualiza para TODOS los items, no solo los que cambian bodega
+  if (newItemState) {
+    await knexTrx("items")
+      .whereIn("id", allItemIds)
+      .update({ state: newItemState, updated_at: now });
+  }
+
+  // ── 2. Actualizar bodega via tabla de enlace ──────────────────────────────
+  if (changing.length > 0) {
+    const changingIds = changing.map((i) => i.id);
+
+    // Eliminar los links actuales de bodega
+    await knexTrx("items_warehouse_lnk").whereIn("item_id", changingIds).delete();
+
+    // Insertar los nuevos links (en chunks para evitar límites de SQL)
+    const CHUNK = 500;
+    for (let i = 0; i < changing.length; i += CHUNK) {
+      await knexTrx("items_warehouse_lnk").insert(
+        changing.slice(i, i + CHUNK).map((item) => ({
+          item_id: item.id,
+          warehouse_id: newWarehouseId,
+        })),
+      );
+    }
+
+    // Si no se actualizó updated_at arriba (purchase), actualizarlo aquí solo para los que cambian
+    if (!newItemState) {
+      await knexTrx("items").whereIn("id", changingIds).update({ updated_at: now });
+    }
+  }
+
+  // ── 2. Actualizar costo (columna directa en items) ────────────────────────
+  if (itemsCostMap && itemsCostMap.size > 0) {
+    // Agrupar por valor de costo para minimizar queries
+    const byCost = new Map();
+    for (const [itemId, cost] of itemsCostMap) {
+      if (!byCost.has(cost)) byCost.set(cost, []);
+      byCost.get(cost).push(itemId);
+    }
+    for (const [cost, ids] of byCost) {
+      await knexTrx("items").whereIn("id", ids).update({ cost, updated_at: now });
+    }
+  }
+
+  // ── 3. Crear movimientos TRANSFER via strapi.db.query + tablas de enlace ──
+  if (changing.length > 0) {
+    const opByItemId = new Map(
+      currentOrder.orderProducts.flatMap((op) =>
+        (op.items || []).map((item) => [item.id, op.id]),
+      ),
+    );
+
+    // createMany usa el contexto de transacción automáticamente y devuelve los IDs
+    const { ids: movementIds } = await strapi.db
+      .query("api::inventory-movement.inventory-movement")
+      .createMany({
+        data: changing.map(() => ({
+          type: INVENTORY_MOVEMENT_TYPES.TRANSFER,
+          quantity: 0,
+          balanceBefore: 0,
+          balanceAfter: 0,
+          reason: "Transferencia del item entre bodegas",
+        })),
+      });
+
+    // Insertar las tablas de enlace de los movimientos (en chunks)
+    const CHUNK = 500;
+    for (let i = 0; i < movementIds.length; i += CHUNK) {
+      const chunkMovIds = movementIds.slice(i, i + CHUNK);
+      const chunkItems = changing.slice(i, i + CHUNK);
+
+      // item_lnk
+      await knexTrx("inventory_movements_item_lnk").insert(
+        chunkMovIds.map((movId, j) => ({
+          inventory_movement_id: movId,
+          item_id: chunkItems[j].id,
+        })),
+      );
+
+      // order_lnk
+      await knexTrx("inventory_movements_order_lnk").insert(
+        chunkMovIds.map((movId) => ({
+          inventory_movement_id: movId,
+          order_id: currentOrder.id,
+        })),
+      );
+
+      // order_product_lnk (solo items que tienen orderProduct)
+      const opRows = chunkMovIds
+        .map((movId, j) => {
+          const opId = opByItemId.get(chunkItems[j].id);
+          return opId ? { inventory_movement_id: movId, order_product_id: opId } : null;
+        })
+        .filter(Boolean);
+      if (opRows.length > 0) {
+        await knexTrx("inventory_movements_order_product_lnk").insert(opRows);
+      }
+
+      // source_warehouse_lnk (bodega origen de cada item)
+      const srcRows = chunkMovIds
+        .map((movId, j) => {
+          const srcId = chunkItems[j].warehouse?.id;
+          return srcId ? { inventory_movement_id: movId, warehouse_id: srcId } : null;
+        })
+        .filter(Boolean);
+      if (srcRows.length > 0) {
+        await knexTrx("inventory_movements_source_warehouse_lnk").insert(srcRows);
+      }
+
+      // destination_warehouse_lnk
+      await knexTrx("inventory_movements_destination_warehouse_lnk").insert(
+        chunkMovIds.map((movId) => ({
+          inventory_movement_id: movId,
+          warehouse_id: newWarehouseId,
+        })),
+      );
+    }
+  }
+
+  logger.debug("bulkMoveItemsToWarehouse completed", {
+    orderId: currentOrder.id,
+    total: items.length,
+    warehouseChanged: changing.length,
+    costsUpdated: itemsCostMap?.size ?? 0,
+  });
+};
 
 /**
  * Actualiza los productos de una orden
@@ -402,7 +579,43 @@ const updateOrderProducts = async (
     );
   }
 
-  // Cache de warehouses para evitar N+1 queries en el loop de itemsToKeep
+  // ── Fast path: bulk update cuando todos los items van a la misma bodega ──
+  // Condición: existe bodega destino a nivel de orden y ningún item del request
+  // tiene override de bodega individual. Cubre el caso más común (purchase/transfer).
+  const hasPerItemWarehouseOverride = itemsToKeep.some((item) => {
+    const reqItem = itemsFromRequest.find((i) => i?.id == item.id);
+    return reqItem?.warehouse != null;
+  });
+
+  const bulkWarehouse =
+    !hasPerItemWarehouseOverride && newDestinationWarehouseEntity
+      ? newDestinationWarehouseEntity
+      : !hasPerItemWarehouseOverride && currentOrder.destinationWarehouse
+        ? currentOrder.destinationWarehouse
+        : null;
+
+  if (bulkWarehouse && itemsToKeep.length > 0) {
+    // Construir mapa de costos: itemId → cost
+    const itemsCostMap = new Map();
+    for (const item of itemsToKeep) {
+      const reqItem = itemsFromRequest.find((i) => i?.id == item.id);
+      const cost = parseFloat(reqItem?.price ?? item.price ?? item.cost) || 0;
+      itemsCostMap.set(item.id, cost);
+    }
+
+    await bulkMoveItemsToWarehouse(strapi, {
+      items: itemsToKeep,
+      newWarehouse: bulkWarehouse,
+      currentOrder,
+      itemsCostMap,
+      trx,
+      orderState,
+    });
+    return;
+  }
+
+  // ── Slow path: per-item warehouse override o sin bodega destino ──
+  // Cache de warehouses para evitar N+1 queries
   const warehouseCache = new Map();
   const getWarehouseCached = async (id) => {
     const key = String(id);
@@ -415,7 +628,6 @@ const updateOrderProducts = async (
     return warehouseCache.get(key);
   };
 
-  // Actualizar items que se mantienen
   await runInBatches(
     itemsToKeep,
     async (item) => {
@@ -435,7 +647,6 @@ const updateOrderProducts = async (
 
       const { product, ...itemData } = item;
 
-      // Determinar el warehouse a usar
       let warehouseToUse = null;
 
       if (newItemData.warehouse) {
@@ -482,8 +693,9 @@ const updateOrderProducts = async (
 };
 
 /**
- * Actualiza OrderProducts existentes sin cambios de items
- * Asegura que los items reciban el destinationWarehouse del order
+ * Actualiza OrderProducts existentes sin cambios de items.
+ * Usa bulk queries para órdenes con muchos items (evita N queries serializadas
+ * por la transacción única de Knex).
  */
 const updateExistingOrderProducts = async (
   strapi,
@@ -494,7 +706,6 @@ const updateExistingOrderProducts = async (
 ) => {
   const { orderProducts } = currentOrder;
 
-  // Usar la nueva bodega si viene, sino usar la de la orden
   let resolvedDestinationWarehouse = currentOrder.destinationWarehouse;
   if (newDestinationWarehouseId) {
     resolvedDestinationWarehouse = await strapi.entityService.findOne(
@@ -504,31 +715,19 @@ const updateExistingOrderProducts = async (
     );
   }
 
-  await Promise.all(
-    orderProducts
-      .filter((op) => op.items.length > 0)
-      .map(({ items, product, ...orderProductData }) =>
-        runInBatches(
-          items,
-          (item) =>
-            strapi.service(ORDER_SERVICE).doItemMovement({
-              movementType: ITEM_MOVEMENT_TYPES.UPDATE,
-              item: {
-                ...item,
-                ...(resolvedDestinationWarehouse && {
-                  warehouse: resolvedDestinationWarehouse,
-                }),
-              },
-              order: currentOrder,
-              orderState,
-              product,
-              orderProduct: orderProductData,
-              trx,
-            }),
-          10,
-        ),
-      ),
-  );
+  if (!resolvedDestinationWarehouse) return;
+
+  const allItems = orderProducts.flatMap((op) => op.items);
+  if (allItems.length === 0) return;
+
+  await bulkMoveItemsToWarehouse(strapi, {
+    items: allItems,
+    newWarehouse: resolvedDestinationWarehouse,
+    currentOrder,
+    itemsCostMap: null,
+    trx,
+    orderState,
+  });
 };
 
 /**
