@@ -523,7 +523,7 @@ const updateExistingOrderProducts = async (
             trx,
           });
         },
-        1,
+        10,
       );
     }
   }
