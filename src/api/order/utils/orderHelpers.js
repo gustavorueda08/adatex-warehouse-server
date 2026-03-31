@@ -337,7 +337,7 @@ const updateOrderProducts = async (
         trx,
       });
     },
-    1,
+    10,
   );
 
   // Agregar nuevos items
@@ -389,7 +389,7 @@ const updateOrderProducts = async (
         });
       }
     },
-    1,
+    10,
   );
 
   // Fetch the new destination warehouse entity if an ID was provided
@@ -401,6 +401,19 @@ const updateOrderProducts = async (
       { transacting: trx },
     );
   }
+
+  // Cache de warehouses para evitar N+1 queries en el loop de itemsToKeep
+  const warehouseCache = new Map();
+  const getWarehouseCached = async (id) => {
+    const key = String(id);
+    if (!warehouseCache.has(key)) {
+      const wh = await strapi.entityService.findOne(WAREHOUSE_SERVICE, id, {
+        transacting: trx,
+      });
+      warehouseCache.set(key, wh);
+    }
+    return warehouseCache.get(key);
+  };
 
   // Actualizar items que se mantienen
   await runInBatches(
@@ -426,13 +439,10 @@ const updateOrderProducts = async (
       let warehouseToUse = null;
 
       if (newItemData.warehouse) {
-        // Si viene warehouse explícitamente en el item request, validar que existe
-        const destinationWarehouseId = newItemData.warehouse?.id || newItemData.warehouse;
-        const destinationWarehouse = await strapi.entityService.findOne(
-          WAREHOUSE_SERVICE,
-          destinationWarehouseId,
-          { transacting: trx },
-        );
+        const destinationWarehouseId =
+          newItemData.warehouse?.id || newItemData.warehouse;
+        const destinationWarehouse =
+          await getWarehouseCached(destinationWarehouseId);
 
         if (!destinationWarehouse) {
           throw new Error("La bodega de destino no existe");
@@ -440,13 +450,10 @@ const updateOrderProducts = async (
 
         warehouseToUse = destinationWarehouse;
       } else if (newDestinationWarehouseEntity) {
-        // Si se está actualizando la bodega de destino a nivel de orden
         warehouseToUse = newDestinationWarehouseEntity;
       } else if (currentOrder.destinationWarehouse) {
-        // Si no viene warehouse en el item ni se actualiza a nivel de orden, usar el current destinationWarehouse de la orden
         warehouseToUse = currentOrder.destinationWarehouse;
       } else {
-        // Fallback al warehouse actual del item
         warehouseToUse = itemData.warehouse;
       }
 
@@ -470,7 +477,7 @@ const updateOrderProducts = async (
         trx,
       });
     },
-    1,
+    10,
   );
 };
 
@@ -497,36 +504,31 @@ const updateExistingOrderProducts = async (
     );
   }
 
-  for (const orderProduct of orderProducts) {
-    if (orderProduct.items.length > 0) {
-      const { items, product, ...orderProductData } = orderProduct;
-
-      await runInBatches(
-        items,
-        (item) => {
-          // Preparar el item con el warehouse correcto
-          const itemWithWarehouse = {
-            ...item,
-            // Si el order tiene destinationWarehouse válido, asignárselo al item
-            ...(resolvedDestinationWarehouse && {
-              warehouse: resolvedDestinationWarehouse,
+  await Promise.all(
+    orderProducts
+      .filter((op) => op.items.length > 0)
+      .map(({ items, product, ...orderProductData }) =>
+        runInBatches(
+          items,
+          (item) =>
+            strapi.service(ORDER_SERVICE).doItemMovement({
+              movementType: ITEM_MOVEMENT_TYPES.UPDATE,
+              item: {
+                ...item,
+                ...(resolvedDestinationWarehouse && {
+                  warehouse: resolvedDestinationWarehouse,
+                }),
+              },
+              order: currentOrder,
+              orderState,
+              product,
+              orderProduct: orderProductData,
+              trx,
             }),
-          };
-
-          return strapi.service(ORDER_SERVICE).doItemMovement({
-            movementType: ITEM_MOVEMENT_TYPES.UPDATE,
-            item: itemWithWarehouse,
-            order: currentOrder,
-            orderState,
-            product,
-            orderProduct: orderProductData,
-            trx,
-          });
-        },
-        10,
-      );
-    }
-  }
+          10,
+        ),
+      ),
+  );
 };
 
 /**

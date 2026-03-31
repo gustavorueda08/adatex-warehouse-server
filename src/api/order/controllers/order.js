@@ -60,7 +60,7 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
         throw new Error("Los datos de la orden son requeridos");
       }
 
-      const { products = [], ...rest } = data.data;
+      const { products, ...rest } = data.data;
       const order = await orderService.update({
         products,
         update: { ...rest },
