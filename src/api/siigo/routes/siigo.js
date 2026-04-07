@@ -304,6 +304,22 @@ module.exports = {
     },
 
     // ============================================
+    // COST CENTERS
+    // ============================================
+    {
+      method: "GET",
+      path: "/siigo/cost-centers",
+      handler: "siigo.listCostCenters",
+      config: { policies: [], middlewares: [] },
+    },
+    {
+      method: "POST",
+      path: "/siigo/cost-centers",
+      handler: "siigo.createCostCenter",
+      config: { policies: [], middlewares: [] },
+    },
+
+    // ============================================
     // TAXES
     // ============================================
     {

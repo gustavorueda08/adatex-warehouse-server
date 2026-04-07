@@ -527,6 +527,45 @@ module.exports = {
   },
 
   // ============================================
+  // COST CENTERS
+  // ============================================
+
+  /**
+   * Lista los centros de costos disponibles en Siigo.
+   * GET /api/siigo/cost-centers
+   */
+  async listCostCenters(ctx) {
+    try {
+      const costCenterService = strapi.service("api::siigo.cost-center");
+      const result = await costCenterService.listCostCenters();
+      ctx.send({ success: true, data: result, total: result.length });
+    } catch (error) {
+      console.error("Error en listCostCenters:", error.message);
+      ctx.throw(500, error.message);
+    }
+  },
+
+  /**
+   * Crea un nuevo centro de costos en Siigo.
+   * POST /api/siigo/cost-centers
+   * Body: { name: string, code?: string }
+   */
+  async createCostCenter(ctx) {
+    try {
+      const { name, code } = ctx.request.body || {};
+      if (!name) {
+        return ctx.badRequest("El campo 'name' es requerido");
+      }
+      const costCenterService = strapi.service("api::siigo.cost-center");
+      const result = await costCenterService.createCostCenter(name, code || name);
+      ctx.send({ success: true, data: result });
+    } catch (error) {
+      console.error("Error en createCostCenter:", error.message);
+      ctx.throw(500, error.message);
+    }
+  },
+
+  // ============================================
   // TAXES
   // ============================================
 

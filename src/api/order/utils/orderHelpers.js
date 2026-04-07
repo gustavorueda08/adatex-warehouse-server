@@ -331,6 +331,157 @@ const bulkMoveItemsToWarehouse = async (
 };
 
 /**
+ * Actualiza el estado de los items en bulk para órdenes SALE/OUT.
+ *
+ * Para estas órdenes los items no cambian de bodega — solo cambian de estado
+ * (available → reserved → sold). Esto reemplaza N × doItemMovement con ~10
+ * queries totales independientemente del número de items.
+ *
+ * Optimización clave: si los items ya están en el estado correcto (caso más
+ * común: orden en draft/confirmed con items RESERVED) la función devuelve
+ * inmediatamente sin tocar la base de datos.
+ *
+ * @param {object} strapi
+ * @param {object[]} items       - Items actuales (con state y warehouse populados)
+ * @param {object}  currentOrder - Orden con orderProducts.items
+ * @param {string}  orderState   - Estado de la orden tras la actualización
+ * @param {object}  trx          - Transacción de Strapi ({ trx: knexTrx, ... })
+ */
+const bulkUpdateSaleItems = async (
+  strapi,
+  { items, currentOrder, orderState, trx },
+) => {
+  if (!items.length) return;
+
+  const ITEM_STATES = require("../../../utils/itemStates");
+  const knexTrx = trx?.trx ?? trx;
+  const now = new Date();
+
+  // Determinar estado destino según el estado de la orden
+  let newItemState;
+  if (orderState === ORDER_STATES.COMPLETED) {
+    newItemState = ITEM_STATES.SOLD;
+  } else if (orderState === ORDER_STATES.CANCELLED) {
+    newItemState = ITEM_STATES.AVAILABLE;
+  } else {
+    newItemState = ITEM_STATES.RESERVED;
+  }
+
+  // Items que realmente necesitan cambio de estado
+  const changing = items.filter((i) => i.state !== newItemState);
+
+  // Caso más común: orden en draft/confirmed, items ya RESERVED → nada que hacer
+  if (changing.length === 0) {
+    logger.debug("bulkUpdateSaleItems: no state changes needed", {
+      orderId: currentOrder.id,
+      total: items.length,
+    });
+    return;
+  }
+
+  const changingIds = changing.map((i) => i.id);
+
+  // ── 1. Bulk update de estado ──────────────────────────────────────────────
+  await knexTrx("items")
+    .whereIn("id", changingIds)
+    .update({ state: newItemState, updated_at: now });
+
+  // ── 2. Para SOLD: limpiar bodega (items vendidos no tienen ubicación física) ─
+  if (newItemState === ITEM_STATES.SOLD) {
+    await knexTrx("items_warehouse_lnk")
+      .whereIn("item_id", changingIds)
+      .delete();
+  }
+
+  // ── 3. Tipo de movimiento de inventario según la transición ───────────────
+  let movementType;
+  if (newItemState === ITEM_STATES.SOLD) {
+    movementType = INVENTORY_MOVEMENT_TYPES.OUT;
+  } else if (newItemState === ITEM_STATES.AVAILABLE) {
+    movementType = INVENTORY_MOVEMENT_TYPES.UNRESERVE;
+  } else {
+    movementType = INVENTORY_MOVEMENT_TYPES.RESERVE;
+  }
+
+  const opByItemId = new Map(
+    currentOrder.orderProducts.flatMap((op) =>
+      (op.items || []).map((item) => [item.id, op.id]),
+    ),
+  );
+
+  // ── 4. Crear movimientos en bulk ─────────────────────────────────────────
+  const { ids: movementIds } = await strapi.db
+    .query("api::inventory-movement.inventory-movement")
+    .createMany({
+      data: changing.map((item) => ({
+        type: movementType,
+        quantity: item.currentQuantity || 0,
+        balanceBefore: item.currentQuantity || 0,
+        balanceAfter:
+          newItemState === ITEM_STATES.SOLD ? 0 : item.currentQuantity || 0,
+        reason: `Cambio de estado a ${newItemState} por orden ${currentOrder.type}`,
+      })),
+    });
+
+  // ── 5. Link tables en chunks ──────────────────────────────────────────────
+  const CHUNK = 500;
+  for (let i = 0; i < movementIds.length; i += CHUNK) {
+    const chunkMovIds = movementIds.slice(i, i + CHUNK);
+    const chunkItems = changing.slice(i, i + CHUNK);
+
+    await knexTrx("inventory_movements_item_lnk").insert(
+      chunkMovIds.map((movId, j) => ({
+        inventory_movement_id: movId,
+        item_id: chunkItems[j].id,
+      })),
+    );
+
+    await knexTrx("inventory_movements_order_lnk").insert(
+      chunkMovIds.map((movId) => ({
+        inventory_movement_id: movId,
+        order_id: currentOrder.id,
+      })),
+    );
+
+    const opRows = chunkMovIds
+      .map((movId, j) => {
+        const opId = opByItemId.get(chunkItems[j].id);
+        return opId
+          ? { inventory_movement_id: movId, order_product_id: opId }
+          : null;
+      })
+      .filter(Boolean);
+    if (opRows.length > 0) {
+      await knexTrx("inventory_movements_order_product_lnk").insert(opRows);
+    }
+
+    // Para OUT (SOLD): registrar bodega origen
+    if (movementType === INVENTORY_MOVEMENT_TYPES.OUT) {
+      const srcRows = chunkMovIds
+        .map((movId, j) => {
+          const srcId = chunkItems[j].warehouse?.id;
+          return srcId
+            ? { inventory_movement_id: movId, warehouse_id: srcId }
+            : null;
+        })
+        .filter(Boolean);
+      if (srcRows.length > 0) {
+        await knexTrx("inventory_movements_source_warehouse_lnk").insert(
+          srcRows,
+        );
+      }
+    }
+  }
+
+  logger.debug("bulkUpdateSaleItems completed", {
+    orderId: currentOrder.id,
+    total: items.length,
+    changed: changing.length,
+    newState: newItemState,
+  });
+};
+
+/**
  * Actualiza los productos de una orden
  */
 const updateOrderProducts = async (
@@ -569,6 +720,23 @@ const updateOrderProducts = async (
     10,
   );
 
+  // ── Fast path SALE/OUT: bulk state update ────────────────────────────────
+  // Para órdenes de venta/salida los items no cambian de bodega; solo cambian
+  // de estado. Usamos bulkUpdateSaleItems en lugar de N llamadas a doItemMovement.
+  if (
+    (currentOrder.type === ORDER_TYPES.SALE ||
+      currentOrder.type === ORDER_TYPES.OUT) &&
+    itemsToKeep.length > 0
+  ) {
+    await bulkUpdateSaleItems(strapi, {
+      items: itemsToKeep,
+      currentOrder,
+      orderState,
+      trx,
+    });
+    return;
+  }
+
   // Fetch the new destination warehouse entity if an ID was provided
   let newDestinationWarehouseEntity = null;
   if (newDestinationWarehouseId) {
@@ -793,6 +961,86 @@ const syncOrderProducts = async (
   });
 };
 
+/**
+ * Remueve un item RESERVED de una orden SALE/OUT usando Knex directo.
+ *
+ * Evita el doble-fetch que ocurre con doItemMovement → itemService.update → _findItem,
+ * y esquiva el entityService.update con disconnect (que hace SELECT antes de cada DELETE).
+ *
+ * Solo aplica cuando item.state === RESERVED. Para items SOLD (orden completada),
+ * se sigue usando el flujo normal vía doItemMovement.
+ *
+ * @param {object} strapi
+ * @param {object} item         - Entidad item ya cargada (con currentQuantity)
+ * @param {object} currentOrder - Orden actual (con id y type)
+ * @param {object} orderProduct - OrderProduct que contiene el item (con id)
+ * @param {object} trx          - Transacción de Strapi ({ trx: knexTrx, ... })
+ * @returns {{id, state, currentQuantity}} Objeto mínimo del item removido
+ */
+const fastUnreserveSaleItem = async (
+  strapi,
+  { item, currentOrder, orderProduct, trx },
+) => {
+  const ITEM_STATES = require("../../../utils/itemStates");
+  const knexTrx = trx?.trx ?? trx;
+  const now = new Date();
+
+  // ── 1. Cambiar estado a AVAILABLE ─────────────────────────────────────────
+  await knexTrx("items")
+    .where("id", item.id)
+    .update({ state: ITEM_STATES.AVAILABLE, updated_at: now });
+
+  // ── 2. Desconectar de la orden y del orderProduct ─────────────────────────
+  await knexTrx("items_orders_lnk")
+    .where({ item_id: item.id, order_id: currentOrder.id })
+    .delete();
+
+  await knexTrx("items_order_products_lnk")
+    .where({ item_id: item.id, order_product_id: orderProduct.id })
+    .delete();
+
+  // ── 3. Crear movimiento UNRESERVE ─────────────────────────────────────────
+  const qty = item.currentQuantity || 0;
+
+  const { ids: movementIds } = await strapi.db
+    .query("api::inventory-movement.inventory-movement")
+    .createMany({
+      data: [
+        {
+          type: INVENTORY_MOVEMENT_TYPES.UNRESERVE,
+          quantity: qty,
+          balanceBefore: qty,
+          balanceAfter: qty,
+          reason: `Ítem removido de orden de ${currentOrder.type}`,
+        },
+      ],
+    });
+
+  const movId = movementIds[0];
+  await knexTrx("inventory_movements_item_lnk").insert({
+    inventory_movement_id: movId,
+    item_id: item.id,
+  });
+  await knexTrx("inventory_movements_order_lnk").insert({
+    inventory_movement_id: movId,
+    order_id: currentOrder.id,
+  });
+  if (orderProduct?.id) {
+    await knexTrx("inventory_movements_order_product_lnk").insert({
+      inventory_movement_id: movId,
+      order_product_id: orderProduct.id,
+    });
+  }
+
+  logger.debug("fastUnreserveSaleItem completed", {
+    orderId: currentOrder.id,
+    itemId: item.id,
+    qty,
+  });
+
+  return { id: item.id, state: ITEM_STATES.AVAILABLE, currentQuantity: qty };
+};
+
 module.exports = {
   validateOrderIsEditable,
   generateOrderNumber,
@@ -801,6 +1049,8 @@ module.exports = {
   updateOrderProducts,
   updateExistingOrderProducts,
   syncOrderProducts,
+  bulkUpdateSaleItems,
+  fastUnreserveSaleItem,
   ORDER_POPULATE,
   ORDER_POPULATE_BASIC,
   EDITABLE_STATES,

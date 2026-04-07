@@ -911,6 +911,10 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     createdDate: Schema.Attribute.DateTime;
     creditBlockOverridden: Schema.Attribute.Boolean &
       Schema.Attribute.DefaultTo<false>;
+    creditNoteIdTypeA: Schema.Attribute.UID;
+    creditNoteIdTypeB: Schema.Attribute.UID;
+    creditNoteNumberTypeA: Schema.Attribute.UID;
+    creditNoteNumberTypeB: Schema.Attribute.UID;
     currency: Schema.Attribute.Enumeration<['USD', 'EUR', 'COP']> &
       Schema.Attribute.DefaultTo<'USD'>;
     customer: Schema.Attribute.Relation<'manyToOne', 'api::customer.customer'>;
@@ -952,6 +956,10 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
     >;
     parentOrder: Schema.Attribute.Relation<'manyToOne', 'api::order.order'>;
     publishedAt: Schema.Attribute.DateTime;
+    purchaseInvoiceNumber: Schema.Attribute.UID;
+    purchaseSiigoId: Schema.Attribute.UID;
+    siigoCostCenterId: Schema.Attribute.String;
+    siigoCostCenterName: Schema.Attribute.String;
     siigoId: Schema.Attribute.UID;
     siigoIdTypeA: Schema.Attribute.UID;
     siigoIdTypeB: Schema.Attribute.UID;
@@ -964,6 +972,8 @@ export interface ApiOrderOrder extends Struct.CollectionTypeSchema {
       ['draft', 'confirmed', 'processing', 'completed', 'cancelled']
     >;
     supplier: Schema.Attribute.Relation<'manyToOne', 'api::supplier.supplier'>;
+    supplierInvoiceNumber: Schema.Attribute.String;
+    supplierInvoicePrefix: Schema.Attribute.String;
     trackingNumber: Schema.Attribute.String;
     transformationFactor: Schema.Attribute.Decimal;
     transitDate: Schema.Attribute.Date;
@@ -1047,7 +1057,9 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     cutTransformationFactor: Schema.Attribute.Decimal;
-    cutUnit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']>;
+    cutUnit: Schema.Attribute.Enumeration<
+      ['kg', 'm', 'unit', 'piece', 'und', 'par']
+    >;
     cutWarehouseType: Schema.Attribute.Enumeration<['smartCut', 'printlab']> &
       Schema.Attribute.DefaultTo<'smartCut'>;
     defaultCutProduct: Schema.Attribute.Boolean &
@@ -1096,7 +1108,9 @@ export interface ApiProductProduct extends Struct.CollectionTypeSchema {
       ['variableQuantityPerItem', 'fixedQuantityPerItem', 'cutItem', 'service']
     > &
       Schema.Attribute.DefaultTo<'variableQuantityPerItem'>;
-    unit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']>;
+    unit: Schema.Attribute.Enumeration<
+      ['kg', 'm', 'unit', 'piece', 'und', 'par']
+    >;
     unitsPerPackage: Schema.Attribute.Integer & Schema.Attribute.DefaultTo<1>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

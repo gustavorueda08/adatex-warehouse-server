@@ -23,7 +23,7 @@
     },
     "unit": {
       "type": "enumeration",
-      "enum": ["kg", "m", "unit", "piece"]
+      "enum": ["kg", "m", "unit", "piece", "und", "par"]
     },
     "isActive": {
       "type": "boolean",
@@ -126,7 +126,7 @@
     },
     "cutUnit": {
       "type": "enumeration",
-      "enum": ["kg", "m", "unit", "piece"]
+      "enum": ["kg", "m", "unit", "piece", "und", "par"]
     },
     "cutTransformationFactor": {
       "type": "decimal"

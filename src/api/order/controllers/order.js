@@ -357,6 +357,89 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
   },
 
   /**
+   * Crea una nota crédito en Siigo para una orden de devolución.
+   * POST /api/orders/:orderId/credit-note
+   */
+  async createCreditNote(ctx) {
+    try {
+      const { orderId } = ctx.params;
+
+      if (!orderId) {
+        return ctx.badRequest("El id de la orden es requerido");
+      }
+
+      const result = await strapi
+        .service("api::siigo.invoice")
+        .createCreditNote(orderId);
+
+      return { data: result };
+    } catch (error) {
+      logger.error("Error al crear nota crédito:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "CreditNoteCreationError",
+          message: error.message,
+          details:
+            process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
+  /**
+   * Descarga el PDF de la nota crédito de una orden de devolución.
+   * GET /api/orders/:orderId/credit-notes?type=A|B
+   */
+  async downloadCreditNote(ctx) {
+    try {
+      const orderService = strapi.service(ORDER_SERVICE);
+      const { orderId } = ctx.params;
+      const { type } = ctx.query;
+
+      if (!orderId) {
+        throw new Error("El id de la orden es requerido");
+      }
+
+      const ncType = (type || "ALL").toUpperCase();
+      if (!["A", "B", "ALL"].includes(ncType)) {
+        throw new Error("El tipo debe ser 'A', 'B' o 'ALL'");
+      }
+
+      const downloadData = await orderService.downloadCreditNote(
+        orderId,
+        ncType,
+      );
+
+      ctx.set("Content-Type", downloadData.mimeType);
+      ctx.set(
+        "Content-Disposition",
+        `attachment; filename="${downloadData.filename}"`,
+      );
+      ctx.body = downloadData.buffer;
+    } catch (error) {
+      logger.error("Error al descargar nota crédito:", error);
+
+      if (
+        error.message.includes("no tiene notas crédito") ||
+        error.message.includes("no encontrada")
+      ) {
+        return ctx.notFound(error.message);
+      }
+
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "CreditNoteDownloadError",
+          message: error.message,
+          details:
+            process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
+  /**
    * Devuelve los items disponibles para nacionalizar de una orden de compra en zona franca.
    * GET /api/orders/:purchaseOrderId/nationalizable-items
    */
@@ -495,6 +578,113 @@ module.exports = createCoreController("api::order.order", ({ strapi }) => ({
     } catch (error) {
       logger.error("Error al gestionar excepción de crédito:", error);
       return ctx.internalServerError(error.message);
+    }
+  },
+
+  /**
+   * Crea un soporte contable (factura de compra FC) en Siigo para una orden de compra.
+   * POST /api/orders/:orderId/purchase-invoice
+   */
+  async createPurchaseInvoice(ctx) {
+    try {
+      const { orderId } = ctx.params;
+
+      if (!orderId) {
+        return ctx.badRequest("El id de la orden es requerido");
+      }
+
+      const result = await strapi
+        .service("api::siigo.purchase")
+        .createPurchaseInvoice(orderId);
+
+      return { data: result };
+    } catch (error) {
+      logger.error("Error al crear soporte contable:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "PurchaseInvoiceCreationError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
+  /**
+   * Actualiza el soporte contable en Siigo con las cantidades confirmadas.
+   * PUT /api/orders/:orderId/purchase-invoice
+   */
+  async updatePurchaseInvoice(ctx) {
+    try {
+      const { orderId } = ctx.params;
+
+      if (!orderId) {
+        return ctx.badRequest("El id de la orden es requerido");
+      }
+
+      const result = await strapi
+        .service("api::siigo.purchase")
+        .updatePurchaseInvoice(orderId);
+
+      return { data: result };
+    } catch (error) {
+      logger.error("Error al actualizar soporte contable:", error);
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "PurchaseInvoiceUpdateError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
+    }
+  },
+
+  /**
+   * Crea la factura electrónica en Siigo para una orden de venta completada.
+   * POST /api/orders/:orderId/sale-invoice
+   */
+  async createSaleInvoice(ctx) {
+    const { orderId } = ctx.params;
+
+    if (!orderId) {
+      return ctx.badRequest("El id de la orden es requerido");
+    }
+
+    try {
+      const invoiceService = strapi.service("api::siigo.invoice");
+      const result = await invoiceService.createInvoiceForOrder(orderId);
+
+      const { ORDER_POPULATE } = require("../utils/orderHelpers");
+      const updatedOrder = await strapi.entityService.findOne(
+        "api::order.order",
+        orderId,
+        { populate: ORDER_POPULATE },
+      );
+
+      strapi.io?.to(`order:${orderId}`).emit("order:invoice-created", {
+        order: updatedOrder,
+        invoiceTypeA: result.invoiceTypeA,
+        invoiceTypeB: result.invoiceTypeB,
+        invoice: result.invoice,
+      });
+
+      return { data: { ...result, order: updatedOrder } };
+    } catch (error) {
+      logger.error("Error al facturar orden de venta:", error);
+      strapi.io?.to(`order:${String(orderId)}`).emit("order:invoice-error", {
+        orderId,
+        error: error.message,
+      });
+      return ctx.internalServerError(error.message, {
+        error: {
+          status: 500,
+          name: "SaleInvoiceCreationError",
+          message: error.message,
+          details: process.env.NODE_ENV !== "production" ? error : undefined,
+        },
+      });
     }
   },
 

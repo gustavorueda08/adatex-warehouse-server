@@ -31,6 +31,7 @@ const {
   updateOrderProducts,
   updateExistingOrderProducts,
   syncOrderProducts,
+  fastUnreserveSaleItem,
   ORDER_POPULATE,
   ORDER_POPULATE_BASIC,
 } = require("../utils/orderHelpers");
@@ -712,7 +713,8 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         const orderProductService = strapi.service(ORDER_PRODUCT_SERVICE);
         const { id, item, product: productId } = data;
 
-        // Obtención del Order actual
+        // Obtención del Order actual (sin precios de cliente — se cargan lazy solo
+        // si necesitamos crear un nuevo OrderProduct para este producto)
         const currentOrder = await strapi.entityService.findOne(
           ORDER_SERVICE,
           id,
@@ -723,11 +725,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               "sourceWarehouse",
               "destinationWarehouse",
               "customerForInvoice",
-              "customerForInvoice.prices",
-              "customerForInvoice.prices.product",
               "customer",
-              "customer.prices",
-              "customer.prices.product",
             ],
             transacting: trx,
           },
@@ -784,6 +782,27 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         let orderProductData = currentOrder.orderProducts.find(
           (op) => op.product.id === productId,
         );
+
+        // Lazy-load precios del cliente: solo necesarios al crear un OrderProduct nuevo
+        // (primera vez que se agrega este producto a la orden). En el caso común
+        // (producto ya listado) esta consulta se omite completamente.
+        if (!orderProductData) {
+          const customerToEnrich = currentOrder.customerForInvoice || currentOrder.customer;
+          if (customerToEnrich?.id) {
+            const enriched = await strapi.entityService.findOne(
+              CUSTOMER_SERVICE,
+              customerToEnrich.id,
+              { populate: ["prices", "prices.product"], transacting: trx },
+            );
+            if (enriched) {
+              if (currentOrder.customerForInvoice?.id === customerToEnrich.id) {
+                currentOrder.customerForInvoice = enriched;
+              } else {
+                currentOrder.customer = enriched;
+              }
+            }
+          }
+        }
 
         // Siempre obtener el producto completo para tener las relaciones necesarias (parentProduct, transformationFactor)
         const product = await strapi.entityService.findOne(
@@ -1178,16 +1197,30 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           throw new Error("El OrderProduct no pudo ser encontrado");
         }
 
-        // Remover el item
-        const removedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
-          movementType: ITEM_MOVEMENT_TYPES.DELETE,
-          item,
-          order: currentOrder,
-          orderProduct,
-          product: orderProduct.product,
-          orderState: currentOrder.state,
-          trx,
-        });
+        // Remover el item — fast path para SALE/OUT con items RESERVED
+        let removedItem;
+        if (
+          (currentOrder.type === ORDER_TYPES.SALE ||
+            currentOrder.type === ORDER_TYPES.OUT) &&
+          item.state === ITEM_STATES.RESERVED
+        ) {
+          removedItem = await fastUnreserveSaleItem(strapi, {
+            item,
+            currentOrder,
+            orderProduct,
+            trx,
+          });
+        } else {
+          removedItem = await strapi.service(ORDER_SERVICE).doItemMovement({
+            movementType: ITEM_MOVEMENT_TYPES.DELETE,
+            item,
+            order: currentOrder,
+            orderProduct,
+            product: orderProduct.product,
+            orderState: currentOrder.state,
+            trx,
+          });
+        }
 
         // Count remaining items across all orderProducts
         let totalItemsLeft = 0;
@@ -1390,6 +1423,122 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
       };
     } catch (error) {
       // Propagar error para que el controller lo maneje
+      throw error;
+    }
+  },
+
+  /**
+   * Descarga el PDF de la nota crédito asociada a una orden de devolución.
+   * @param {Number} orderId - ID de la orden de devolución
+   * @param {String} type - 'A', 'B' o 'ALL' (por defecto ALL)
+   * @returns {Object} - { buffer, mimeType, filename, type }
+   */
+  async downloadCreditNote(orderId, type = "ALL") {
+    try {
+      const order = await strapi.entityService.findOne(ORDER_SERVICE, orderId, {
+        populate: ["customer", "parentOrder"],
+      });
+
+      if (!order) {
+        throw new Error("Orden no encontrada");
+      }
+
+      const siigoInvoiceService = strapi.service("api::siigo.invoice");
+      const moment = require("moment");
+
+      const getCustomerName = (customer) => {
+        if (!customer) return "Unknown";
+        return `${customer.name || ""} ${customer.lastName || ""}`.trim();
+      };
+      const getFormattedDate = (date) =>
+        date ? moment(date).format("DD-MM-YYYY") : moment().format("DD-MM-YYYY");
+
+      // Obtener cliente desde parentOrder si no está en la orden propia
+      const customer =
+        order.customer || order.parentOrder?.customer || null;
+      const customerName = getCustomerName(customer);
+      const dateStr = getFormattedDate(order.completedDate);
+
+      const getFilename = (ncType) => {
+        if (ncType === "A") {
+          const num = order.creditNoteNumberTypeA || "SIN-NUMERO";
+          return `NC-${num} - ${customerName} (${dateStr}).pdf`;
+        }
+        if (ncType === "B") {
+          const num = order.creditNoteNumberTypeB || "SIN-NUMERO";
+          return `NC-${num} - ${customerName} (${dateStr}).pdf`;
+        }
+        return `nota-credito_${order.code || orderId}.pdf`;
+      };
+
+      const idA = order.creditNoteIdTypeA;
+      const idB = order.creditNoteIdTypeB;
+
+      if (!idA && !idB) {
+        throw new Error(
+          "La orden no tiene notas crédito emitidas en Siigo",
+        );
+      }
+
+      if (type === "ALL") {
+        if (idA && idB) {
+          const archiver = require("archiver");
+          const { Writable } = require("stream");
+          const [pdfA, pdfB] = await Promise.all([
+            siigoInvoiceService.downloadCreditNotePdf(idA),
+            siigoInvoiceService.downloadCreditNotePdf(idB),
+          ]);
+          const chunks = [];
+          const output = new Writable({
+            write(chunk, encoding, callback) {
+              chunks.push(chunk);
+              callback();
+            },
+          });
+          return new Promise((resolve, reject) => {
+            const archive = archiver("zip", { zlib: { level: 9 } });
+            archive.on("error", reject);
+            output.on("finish", () => {
+              resolve({
+                buffer: Buffer.concat(chunks),
+                mimeType: "application/zip",
+                filename: `Notas Credito - ${customerName} (${dateStr}).zip`,
+                type: "zip",
+              });
+            });
+            archive.pipe(output);
+            archive.append(pdfA, { name: getFilename("A") });
+            archive.append(pdfB, { name: getFilename("B") });
+            archive.finalize();
+          });
+        }
+        // Solo uno disponible: devolver PDF directamente
+        const singleId = idA || idB;
+        const singleType = idA ? "A" : "B";
+        const pdfBuffer = await siigoInvoiceService.downloadCreditNotePdf(singleId);
+        return {
+          buffer: pdfBuffer,
+          mimeType: "application/pdf",
+          filename: getFilename(singleType),
+          type: "pdf",
+        };
+      }
+
+      // Tipo específico
+      const siigoId = type === "A" ? idA : idB;
+      if (!siigoId) {
+        throw new Error(
+          `La orden no tiene nota crédito Tipo ${type} asociada`,
+        );
+      }
+      const pdfBuffer = await siigoInvoiceService.downloadCreditNotePdf(siigoId);
+      return {
+        buffer: pdfBuffer,
+        mimeType: "application/pdf",
+        filename: getFilename(type),
+        type: "pdf",
+      };
+    } catch (error) {
       throw error;
     }
   },

@@ -12,8 +12,11 @@ module.exports = {
         result?.state === "completed" &&
         (params?.data?.state === "completed" || params?.data?.completedDate);
 
-      if (!stateChangedToCompleted) {
-        logger.info("Order updated, but not completed");
+      const stateChangedToConfirmed =
+        result?.state === "confirmed" && params?.data?.state === "confirmed";
+
+      if (!stateChangedToCompleted && !stateChangedToConfirmed) {
+        logger.info("Order updated, but not completed or confirmed");
         return;
       }
 
@@ -30,65 +33,39 @@ module.exports = {
         return;
       }
 
+      // ========== Soporte contable de compra (al confirmar) ==========
+      if (stateChangedToConfirmed && freshOrder.type === "purchase") {
+        const canAutoCreate =
+          !freshOrder.purchaseSiigoId &&
+          freshOrder.supplier?.identification &&
+          freshOrder.supplierInvoiceNumber;
+
+        if (canAutoCreate) {
+          try {
+            logger.info(
+              `Order ${freshOrder.code} confirmada. Creando soporte contable en Siigo...`
+            );
+            const purchaseService = strapi.service("api::siigo.purchase");
+            await purchaseService.createPurchaseInvoice(freshOrder.id);
+          } catch (err) {
+            logger.error(
+              `Error al crear soporte contable para Order ${freshOrder.code}:`,
+              err.message
+            );
+            strapi.io?.to(`order:${freshOrder.id}`).emit("order:purchase-invoice-error", {
+              orderId: freshOrder.id,
+              error: err.message,
+            });
+          }
+        }
+        return;
+      }
+
       if (freshOrder.type !== "sale") return;
 
-      const shouldInvoice =
-        freshOrder.emitInvoice === true &&
-        freshOrder.customerForInvoice &&
-        !freshOrder.siigoIdTypeA &&
-        !freshOrder.siigoIdTypeB;
-
-      if (shouldInvoice) {
-        try {
-          logger.info(
-            `Order ${freshOrder.code} completada. Iniciando facturación automática...`,
-          );
-
-          const invoiceService = strapi.service("api::siigo.invoice");
-          const invoiceResult = await invoiceService.createInvoiceForOrder(
-            freshOrder.id,
-          );
-
-          if (invoiceResult.invoiceTypeB) {
-            logger.info(
-              `Facturas creadas para Order ${freshOrder.code}: Tipo A: ${invoiceResult.invoiceTypeA.siigoId}, Tipo B: ${invoiceResult.invoiceTypeB.siigoId}`,
-            );
-          } else {
-            logger.info(
-              `Factura tipo A creada para Order ${freshOrder.code}: ${invoiceResult.invoiceTypeA.siigoId}`,
-            );
-          }
-
-          const updatedOrder = await strapi.entityService.findOne(
-            "api::order.order",
-            freshOrder.id,
-            {
-              populate: ORDER_POPULATE,
-              // Intentar bypassear cache si es posible (depende de plugins de cache, pero no hace daño)
-              _cache: false,
-            },
-          );
-
-          strapi.io
-            ?.to(`order:${freshOrder.id}`)
-            .emit("order:invoice-created", {
-              order: updatedOrder,
-              invoiceTypeA: invoiceResult.invoiceTypeA,
-              invoiceTypeB: invoiceResult.invoiceTypeB,
-              invoice: invoiceResult.invoice,
-            });
-        } catch (invoiceError) {
-          logger.error(
-            `Error al facturar Order ${freshOrder.code}:`,
-            invoiceError.message,
-          );
-          strapi.io?.to(`order:${freshOrder.id}`).emit("order:invoice-error", {
-            orderId: freshOrder.id,
-            orderCode: freshOrder.code,
-            error: invoiceError.message,
-          });
-        }
-      }
+      // La facturación de órdenes de venta ya no se dispara desde el lifecycle.
+      // Se usa el endpoint dedicado POST /api/orders/:orderId/sale-invoice
+      // (manejado por order.createSaleInvoice en el controlador).
 
       // ========== 2. Sincronizar precios del customer ==========
       if (freshOrder.customer) {

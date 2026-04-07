@@ -56,6 +56,31 @@ module.exports = {
       handler: "order.approveCreditOverride",
     },
     {
+      path: "/orders/:orderId/credit-note",
+      method: "POST",
+      handler: "order.createCreditNote",
+    },
+    {
+      path: "/orders/:orderId/credit-notes",
+      method: "GET",
+      handler: "order.downloadCreditNote",
+    },
+    {
+      path: "/orders/:orderId/purchase-invoice",
+      method: "POST",
+      handler: "order.createPurchaseInvoice",
+    },
+    {
+      path: "/orders/:orderId/purchase-invoice",
+      method: "PUT",
+      handler: "order.updatePurchaseInvoice",
+    },
+    {
+      path: "/orders/:orderId/sale-invoice",
+      method: "POST",
+      handler: "order.createSaleInvoice",
+    },
+    {
       method: "POST",
       path: "/orders/test-email",
       handler: "order.testEmail",

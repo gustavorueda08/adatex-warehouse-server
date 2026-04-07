@@ -80,6 +80,18 @@
     "invoiceNumberTypeB": {
       "type": "uid"
     },
+    "creditNoteIdTypeA": {
+      "type": "uid"
+    },
+    "creditNoteNumberTypeA": {
+      "type": "uid"
+    },
+    "creditNoteIdTypeB": {
+      "type": "uid"
+    },
+    "creditNoteNumberTypeB": {
+      "type": "uid"
+    },
     "trackingNumber": {
       "type": "string"
     },
@@ -217,6 +229,24 @@
     },
     "transitDate": {
       "type": "date"
+    },
+    "purchaseSiigoId": {
+      "type": "uid"
+    },
+    "purchaseInvoiceNumber": {
+      "type": "uid"
+    },
+    "supplierInvoicePrefix": {
+      "type": "string"
+    },
+    "supplierInvoiceNumber": {
+      "type": "string"
+    },
+    "siigoCostCenterId": {
+      "type": "string"
+    },
+    "siigoCostCenterName": {
+      "type": "string"
     }
   }
 }

@@ -644,18 +644,333 @@ module.exports = ({ strapi }) => ({
   },
 
   /**
-   * Crea una nota crédito en Siigo (para devoluciones)
-   * @param {Number} orderId - ID de la orden de devolución
-   * @returns {Object} - Nota crédito creada
+   * Crea una o dos notas crédito en Siigo para una orden de devolución.
+   * Si la orden de venta padre tiene TypeA y TypeB, se crean dos NC.
+   *
+   * @param {Number} returnOrderId - ID de la orden de devolución
+   * @returns {Object} - { success, creditNoteTypeA?, creditNoteTypeB? }
    */
-  async createCreditNote(orderId) {
+  async createCreditNote(returnOrderId) {
     try {
-      // TODO: Implementar creación de notas crédito
-      // Similar a createInvoiceForOrder pero para tipo 'return'
-      throw new Error("Creación de notas crédito aún no implementada");
+      const returnOrder = await strapi.entityService.findOne(
+        ORDER_SERVICE,
+        returnOrderId,
+        {
+          populate: {
+            orderProducts: { populate: { product: true } },
+            parentOrder: {
+              populate: {
+                orderProducts: { populate: { product: true } },
+                customerForInvoice: { populate: { taxes: true } },
+                customer: { populate: { seller: true } },
+              },
+            },
+          },
+        },
+      );
+
+      if (!returnOrder) {
+        throw new Error(`Orden de devolución ${returnOrderId} no encontrada`);
+      }
+      if (returnOrder.type !== "return") {
+        throw new Error("La orden no es de tipo devolución");
+      }
+
+      const parentOrder = returnOrder.parentOrder;
+      if (!parentOrder) {
+        throw new Error(
+          "La orden de devolución no tiene una orden de venta padre asociada",
+        );
+      }
+      // Compatibilidad con campo legacy siigoId (facturas emitidas antes del sistema dual)
+      if (!parentOrder.siigoIdTypeA && parentOrder.siigoId) {
+        parentOrder.siigoIdTypeA = parentOrder.siigoId;
+      }
+
+      if (!parentOrder.siigoIdTypeA && !parentOrder.siigoIdTypeB) {
+        throw new Error(
+          "La orden de venta original no tiene facturas emitidas en Siigo. Emite primero la factura de venta.",
+        );
+      }
+
+      const authService = strapi.service("api::siigo.auth");
+      const mapperService = strapi.service("api::siigo.mapper");
+      const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+      const reason = parseInt(process.env.SIIGO_CREDIT_NOTE_REASON) || 1;
+
+      // Obtener el tipo de comprobante NC
+      let documentTypeId = parseInt(process.env.SIIGO_CREDIT_NOTE_DOCUMENT_ID);
+      if (!documentTypeId) {
+        logger.info("Consultando tipo de comprobante NC en Siigo...");
+        const dtResponse = await authService.authenticatedFetch(
+          `${apiUrl}/v1/document-types?type=NC`,
+          { method: "GET" },
+        );
+        if (!dtResponse.ok) {
+          throw new Error(
+            `Error al consultar tipos de comprobante NC: ${dtResponse.status}`,
+          );
+        }
+        const dtData = await dtResponse.json();
+        const ncTypes = (dtData.results || dtData || []).filter(
+          (d) => d.active !== false,
+        );
+        if (!ncTypes.length) {
+          throw new Error(
+            "No se encontró ningún tipo de comprobante NC activo en Siigo. " +
+              "Configura SIIGO_CREDIT_NOTE_DOCUMENT_ID en el .env.",
+          );
+        }
+        documentTypeId = ncTypes[0].id;
+        logger.info(`Tipo de comprobante NC encontrado: ${documentTypeId}`);
+      }
+
+      let creditNoteTypeA = null;
+      let creditNoteTypeB = null;
+      const updateData = {};
+
+      // Nota crédito para factura Tipo A
+      if (parentOrder.siigoIdTypeA) {
+        try {
+          logger.info("Creando nota crédito para factura Tipo A...");
+          // Inyectar parentOrder en returnOrder para el mapper
+          const returnOrderWithParent = {
+            ...returnOrder,
+            parentOrder,
+          };
+          const creditNoteDataA = await mapperService.mapReturnOrderToCreditNote(
+            returnOrderWithParent,
+            parentOrder.siigoIdTypeA,
+            documentTypeId,
+            reason,
+          );
+          creditNoteTypeA = await this._sendCreditNoteToSiigo(
+            creditNoteDataA,
+            apiUrl,
+            authService,
+          );
+          logger.info(`✓ Nota crédito Tipo A creada: ${creditNoteTypeA.id}`);
+          updateData.creditNoteIdTypeA = String(creditNoteTypeA.id);
+          updateData.creditNoteNumberTypeA = String(
+            creditNoteTypeA.number || creditNoteTypeA.id,
+          );
+        } catch (error) {
+          console.error(
+            "Error al crear nota crédito Tipo A:",
+            error.message,
+          );
+          throw new Error(
+            `Error al crear nota crédito para factura Tipo A: ${error.message}`,
+          );
+        }
+      }
+
+      // Nota crédito para factura Tipo B (si existe)
+      if (parentOrder.siigoIdTypeB) {
+        try {
+          logger.info("Creando nota crédito para factura Tipo B...");
+          const returnOrderWithParent = {
+            ...returnOrder,
+            parentOrder: {
+              ...parentOrder,
+              customerForInvoice: { ...parentOrder.customerForInvoice, taxes: [] },
+            },
+          };
+          const creditNoteDataB = await mapperService.mapReturnOrderToCreditNote(
+            returnOrderWithParent,
+            parentOrder.siigoIdTypeB,
+            documentTypeId,
+            reason,
+          );
+          creditNoteTypeB = await this._sendCreditNoteToSiigo(
+            creditNoteDataB,
+            apiUrl,
+            authService,
+          );
+          logger.info(`✓ Nota crédito Tipo B creada: ${creditNoteTypeB.id}`);
+          updateData.creditNoteIdTypeB = String(creditNoteTypeB.id);
+          updateData.creditNoteNumberTypeB = String(
+            creditNoteTypeB.number || creditNoteTypeB.id,
+          );
+        } catch (error) {
+          console.error(
+            "Error al crear nota crédito Tipo B:",
+            error.message,
+          );
+          if (creditNoteTypeA) {
+            console.warn(
+              "⚠ Nota crédito Tipo A creada exitosamente, pero Tipo B falló.",
+            );
+          } else {
+            throw new Error(
+              `Error al crear nota crédito para factura Tipo B: ${error.message}`,
+            );
+          }
+        }
+      }
+
+      if (!creditNoteTypeA && !creditNoteTypeB) {
+        throw new Error("No se creó ninguna nota crédito");
+      }
+
+      // Actualizar la orden de devolución con los IDs de notas crédito
+      await strapi.entityService.update(ORDER_SERVICE, returnOrderId, {
+        data: updateData,
+      });
+
+      logger.info(
+        `✓ Orden ${returnOrder.code} actualizada con notas crédito:${creditNoteTypeA ? " NC-A" : ""}${creditNoteTypeB ? " NC-B" : ""}`,
+      );
+
+      // Emitir evento WebSocket
+      const updatedOrder = await strapi.entityService.findOne(
+        ORDER_SERVICE,
+        returnOrderId,
+        { populate: ["customer", "parentOrder"] },
+      );
+      strapi.io
+        ?.to(`order:${returnOrderId}`)
+        .emit("order:credit-note-created", {
+          order: updatedOrder,
+          creditNoteTypeA: creditNoteTypeA
+            ? { siigoId: creditNoteTypeA.id, number: creditNoteTypeA.number }
+            : null,
+          creditNoteTypeB: creditNoteTypeB
+            ? { siigoId: creditNoteTypeB.id, number: creditNoteTypeB.number }
+            : null,
+        });
+
+      return {
+        success: true,
+        creditNoteTypeA: creditNoteTypeA
+          ? { siigoId: creditNoteTypeA.id, number: creditNoteTypeA.number }
+          : null,
+        creditNoteTypeB: creditNoteTypeB
+          ? { siigoId: creditNoteTypeB.id, number: creditNoteTypeB.number }
+          : null,
+      };
     } catch (error) {
-      console.error("Error al crear nota crédito:", error.message);
-      throw error;
+      console.error(
+        `Error al crear nota crédito para orden ${returnOrderId}:`,
+        error.message,
+      );
+      throw new Error(`Error al crear nota crédito en Siigo: ${error.message}`);
+    }
+  },
+
+  /**
+   * Envía una nota crédito a Siigo con lógica de reintento por totales.
+   * @param {Object} creditNoteData - Datos en formato Siigo
+   * @param {String} apiUrl - URL base de la API
+   * @param {Object} authService - Servicio de autenticación
+   * @param {Number} retryCount - Contador de reintentos
+   * @returns {Object} - Respuesta de Siigo con la nota crédito creada
+   */
+  async _sendCreditNoteToSiigo(
+    creditNoteData,
+    apiUrl,
+    authService,
+    retryCount = 0,
+  ) {
+    const response = await authService.authenticatedFetch(
+      `${apiUrl}/v1/credit-notes`,
+      {
+        method: "POST",
+        body: JSON.stringify(creditNoteData),
+      },
+    );
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Error de Siigo (nota crédito):", errorData);
+
+      if (response.status === 400 && retryCount < 3) {
+        logger.info(
+          `Error 400 NC (Intento ${retryCount + 1}). Intentando ajustar total...`,
+        );
+        try {
+          const numbers = errorData.match(/[\d]+[.,]?[\d]*/g);
+          if (numbers && numbers.length >= 2) {
+            const currentTotal = creditNoteData.payments[0].value;
+            let bestCandidate = null;
+            let minDiff = Infinity;
+            for (const numStr of numbers) {
+              const val = parseFloat(numStr.replace(",", "."));
+              if (isNaN(val) || val === 400 || val === 0) continue;
+              const diff = Math.abs(val - currentTotal);
+              if (diff < 0.0001) continue;
+              if (diff < minDiff) {
+                minDiff = diff;
+                bestCandidate = val;
+              }
+            }
+            if (bestCandidate !== null) {
+              logger.info(
+                `[NC Retry] Ajustando total: ${currentTotal} -> ${bestCandidate}`,
+              );
+              const newData = JSON.parse(JSON.stringify(creditNoteData));
+              newData.payments[0].value = bestCandidate;
+              return await this._sendCreditNoteToSiigo(
+                newData,
+                apiUrl,
+                authService,
+                retryCount + 1,
+              );
+            }
+          }
+        } catch (retryError) {
+          console.error("Fallo en lógica de reintento NC:", retryError);
+        }
+      }
+      throw new Error(`Error HTTP ${response.status}: ${errorData}`);
+    }
+
+    const siigoNC = await response.json();
+    if (!siigoNC || !siigoNC.id) {
+      throw new Error("Respuesta inválida de Siigo al crear nota crédito");
+    }
+    return siigoNC;
+  },
+
+  /**
+   * Descarga el PDF de una nota crédito en Siigo.
+   * @param {String} siigoCreditNoteId - ID de la nota crédito en Siigo
+   * @returns {Buffer} - Contenido del PDF
+   */
+  async downloadCreditNotePdf(siigoCreditNoteId) {
+    try {
+      const authService = strapi.service("api::siigo.auth");
+      const apiUrl = process.env.SIIGO_API_URL || "https://api.siigo.com";
+
+      const response = await authService.authenticatedFetch(
+        `${apiUrl}/v1/credit-notes/${siigoCreditNoteId}/pdf`,
+        { method: "GET" },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const payload = await response.json();
+      const base64Content = payload?.base64 || payload?.Base64;
+
+      if (!base64Content) {
+        throw new Error("Respuesta de Siigo sin campo base64");
+      }
+
+      const sanitized = base64Content
+        .replace(/^data:application\/pdf;base64,/, "")
+        .replace(/\s+/g, "");
+
+      return Buffer.from(sanitized, "base64");
+    } catch (error) {
+      console.error(
+        `Error al descargar PDF nota crédito ${siigoCreditNoteId}:`,
+        error.message,
+      );
+      throw new Error(
+        `Error al descargar PDF de nota crédito en Siigo: ${error.message}`,
+      );
     }
   },
 

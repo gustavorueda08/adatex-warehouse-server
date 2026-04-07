@@ -1045,4 +1045,267 @@ module.exports = ({ strapi }) => ({
     localProduct.category = category ? category.value : "Confeccion";
     return localProduct;
   },
+
+  /**
+   * Mapea una orden de devolución al formato de nota crédito de Siigo.
+   *
+   * Diferencia clave con mapOrderToInvoice: Siigo NO soporta `taxed_price`
+   * en notas crédito, por lo que siempre se envía el precio base (sin IVA)
+   * más el array de taxes, independientemente de `ivaIncluded`.
+   *
+   * @param {Object} returnOrder - Orden de devolución con populate de orderProducts.product
+   *   y parentOrder.orderProducts.product, parentOrder.customerForInvoice.taxes
+   * @param {String} siigoInvoiceId - UUID de la factura original en Siigo
+   * @param {Number} documentTypeId - ID del tipo de comprobante NC en Siigo
+   * @param {Number} reason - Código de motivo de devolución DIAN (default 1)
+   * @returns {Object} - JSON en formato Siigo para POST /v1/credit-notes
+   */
+  async mapReturnOrderToCreditNote(
+    returnOrder,
+    siigoInvoiceId,
+    documentTypeId,
+    reason = 1,
+  ) {
+    try {
+      const parentOrder = returnOrder.parentOrder;
+      if (!parentOrder) {
+        throw new Error(
+          "La orden de devolución no tiene una orden padre asociada",
+        );
+      }
+
+      const customerForInvoice = parentOrder.customerForInvoice;
+
+      // Construir un mapa de orderProducts del parentOrder por producto ID
+      const parentProductMap = new Map();
+      for (const pop of parentOrder.orderProducts || []) {
+        if (pop.product) {
+          parentProductMap.set(pop.product.id, pop);
+        }
+      }
+
+      const items = [];
+      for (const rop of returnOrder.orderProducts || []) {
+        const returnQty =
+          parseFloat(rop.confirmedQuantity) ||
+          (rop.items || []).reduce(
+            (s, i) => s + (parseFloat(i.currentQuantity) || 0),
+            0,
+          );
+
+        if (!returnQty || returnQty <= 0) continue;
+
+        const product = rop.product;
+        if (!product) {
+          throw new Error(
+            `OrderProduct ID ${rop.id} de la devolución no tiene producto asociado`,
+          );
+        }
+        if (!product.siigoId) {
+          throw new Error(
+            `El producto ${product.name} (Code: ${product.code}) no tiene siigoId`,
+          );
+        }
+
+        // Obtener precio original desde el parentOrder
+        const parentOp = parentProductMap.get(product.id);
+        if (!parentOp) {
+          throw new Error(
+            `No se encontró el producto ${product.code} en la orden de venta original`,
+          );
+        }
+
+        let basePrice = parseFloat(parentOp.price);
+        if (isNaN(basePrice) || basePrice <= 0) continue; // regalo, saltar
+
+        // Siigo NC no soporta taxed_price: siempre usar precio base sin IVA
+        if (parentOp.ivaIncluded === true) {
+          basePrice = Number((basePrice / 1.19).toFixed(6));
+        } else {
+          basePrice = Math.round(basePrice * 100) / 100;
+        }
+
+        const taxes = this.getProductTaxes(parentOp, customerForInvoice);
+
+        const item = {
+          code: product.code || product.siigoId,
+          quantity: Math.round(returnQty * 100) / 100,
+          price: basePrice,
+          discount: 0,
+        };
+        if (taxes.length > 0) {
+          item.taxes = taxes;
+        }
+        items.push(item);
+      }
+
+      if (items.length === 0) {
+        throw new Error("No hay items válidos para la nota crédito");
+      }
+
+      // Calcular total aproximado para el campo payments
+      const taxRate = this._getCustomerTaxRate(customerForInvoice);
+      const total = Math.round(
+        items.reduce((s, i) => s + i.price * i.quantity * (1 + taxRate), 0) *
+          100,
+      ) / 100;
+
+      const bogotaNow = moment().tz("America/Bogota");
+      const paymentTermType =
+        parseInt(process.env.SIIGO_CREDIT_NOTE_PAYMENT_ID) || 2810;
+
+      const creditNote = {
+        document: { id: documentTypeId },
+        date: bogotaNow.format("YYYY-MM-DD"),
+        invoice: siigoInvoiceId,
+        reason,
+        observations: `Nota crédito devolución - Orden: ${returnOrder.code}`,
+        items,
+        payments: [
+          {
+            id: paymentTermType,
+            value: total,
+            due_date: bogotaNow.format("YYYY-MM-DD"),
+          },
+        ],
+      };
+
+      if (process.env.SIIGO_COST_CENTER_ID) {
+        creditNote.cost_center = parseInt(process.env.SIIGO_COST_CENTER_ID);
+      }
+
+      logger.debug(
+        "Nota crédito mapeada:",
+        JSON.stringify(creditNote, null, 2),
+      );
+      return creditNote;
+    } catch (error) {
+      console.error("Error al mapear devolución a nota crédito:", error.message);
+      throw error;
+    }
+  },
+
+  /**
+   * Mapea una orden de compra al formato de factura de compra (FC) de Siigo.
+   *
+   * - mode "create": usa requestedQuantity por producto.
+   * - mode "update": usa confirmedQuantity (fallback a requestedQuantity) para reflejar
+   *   lo que ya llegó a bodega.
+   *
+   * @param {Object} order - Orden de compra con populate de supplier.taxes,
+   *   orderProducts.product, destinationWarehouse.
+   * @param {Number} documentTypeId - ID del tipo de documento FC en Siigo.
+   * @param {"create"|"update"} mode - Modo de operación.
+   * @returns {Object} - JSON en formato Siigo para POST/PUT /v1/purchases.
+   */
+  mapOrderToPurchaseInvoice(order, documentTypeId, mode = "create", costCenterId = null) {
+    try {
+      if (!order.supplier) {
+        throw new Error("La orden de compra no tiene proveedor configurado");
+      }
+      if (!order.supplier.identification) {
+        throw new Error("El proveedor no tiene NIT/identificación configurado");
+      }
+      if (!order.orderProducts || order.orderProducts.length === 0) {
+        throw new Error("La orden no tiene productos para el soporte contable");
+      }
+
+      const bogotaNow = moment().tz("America/Bogota");
+      // Reutilizamos getProductTaxes pasando el supplier como si fuera el customer
+      const supplierAsTaxHolder = { taxes: order.supplier.taxes || [] };
+
+      const items = [];
+      for (const op of order.orderProducts) {
+        if (!op.product) continue;
+        if (!op.product.siigoId) {
+          throw new Error(
+            `El producto ${op.product.name || op.product.code} no tiene siigoId. Sincronícelo con Siigo primero.`
+          );
+        }
+
+        const quantity =
+          mode === "create"
+            ? Number(op.requestedQuantity) || 0
+            : Number(op.confirmedQuantity) || Number(op.requestedQuantity) || 0;
+
+        if (quantity <= 0) continue;
+
+        let basePrice = parseFloat(op.price);
+        if (isNaN(basePrice) || basePrice <= 0) continue; // regalo, saltar
+
+        if (op.ivaIncluded === true) {
+          basePrice = Number((basePrice / 1.19).toFixed(6));
+        } else {
+          basePrice = Math.round(basePrice * 100) / 100;
+        }
+
+        const taxes = this.getProductTaxes(op, supplierAsTaxHolder);
+
+        const item = {
+          code: op.product.code || op.product.siigoId,
+          description: op.product.name,
+          quantity: Math.round(quantity * 100) / 100,
+          price: basePrice,
+          discount: 0,
+        };
+        if (taxes.length > 0) item.taxes = taxes;
+        items.push(item);
+      }
+
+      if (items.length === 0) {
+        throw new Error("No hay items válidos para el soporte contable");
+      }
+
+      // Calcular total aproximado para el campo payments
+      const taxRate = this._getCustomerTaxRate(supplierAsTaxHolder);
+      const total =
+        Math.round(
+          items.reduce((s, i) => s + i.price * i.quantity * (1 + taxRate), 0) * 100
+        ) / 100;
+
+      const observations = [
+        `Orden: ${order.code}`,
+        `Estado: ${order.state}`,
+        `Bodega: ${order.destinationWarehouse?.name || "-"}`,
+        bogotaNow.format("YYYY-MM-DD"),
+      ].join(" | ");
+
+      const paymentId = process.env.SIIGO_PURCHASE_PAYMENT_ID
+        ? parseInt(process.env.SIIGO_PURCHASE_PAYMENT_ID)
+        : 2810;
+
+      const purchaseInvoice = {
+        document: { id: documentTypeId },
+        date: bogotaNow.format("YYYY-MM-DD"),
+        provider_invoice: {
+          prefix: order.supplierInvoicePrefix || "EXT",
+          number: order.supplierInvoiceNumber || order.code,
+        },
+        supplier: {
+          identification: order.supplier.identification,
+          branch_office: 0,
+        },
+        tax_included: false,
+        observations,
+        items,
+        payments: [
+          {
+            id: paymentId,
+            value: total,
+            due_date: bogotaNow.format("YYYY-MM-DD"),
+          },
+        ],
+      };
+
+      if (costCenterId) {
+        purchaseInvoice.cost_center = parseInt(costCenterId);
+      }
+
+      logger.debug("Soporte contable mapeado:", JSON.stringify(purchaseInvoice, null, 2));
+      return purchaseInvoice;
+    } catch (error) {
+      console.error("Error al mapear orden a soporte contable:", error.message);
+      throw error;
+    }
+  },
 });

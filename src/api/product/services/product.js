@@ -1044,6 +1044,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       pagination: paginationParams,
       collections,
       includeItems,
+      hideZeroStock,
       date, // Historical mode
       fromDate, // Projection mode start
       toDate, // Projection mode end
@@ -1121,30 +1122,33 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       });
     }
 
-    // 6. Filter out products with all-zero inventory stats
-    const nonZero = allWithInventory.filter((p) => {
-      const inv = p.inventory;
-      if (!inv) return false;
-      return (
-        (inv.stock || 0) > 0 ||
-        (inv.smartCut || 0) > 0 ||
-        (inv.printlab || 0) > 0 ||
-        (inv.freeTradeZone || 0) > 0 ||
-        (inv.production || 0) > 0 ||
-        (inv.transit || 0) > 0 ||
-        (inv.defective || 0) > 0 ||
-        (inv.reserved || 0) > 0 ||
-        (inv.required || 0) > 0 ||
-        (inv.netAvailable || 0) !== 0 ||
-        (inv.arriving || 0) > 0
-      );
-    });
+    // 6. Optionally filter out products with all-zero inventory stats (default: on)
+    const shouldHide = hideZeroStock !== "false" && hideZeroStock !== false;
+    const filtered = shouldHide
+      ? allWithInventory.filter((p) => {
+          const inv = p.inventory;
+          if (!inv) return false;
+          return (
+            (inv.stock || 0) > 0 ||
+            (inv.smartCut || 0) > 0 ||
+            (inv.printlab || 0) > 0 ||
+            (inv.freeTradeZone || 0) > 0 ||
+            (inv.production || 0) > 0 ||
+            (inv.transit || 0) > 0 ||
+            (inv.defective || 0) > 0 ||
+            (inv.reserved || 0) > 0 ||
+            (inv.required || 0) > 0 ||
+            (inv.netAvailable || 0) !== 0 ||
+            (inv.arriving || 0) > 0
+          );
+        })
+      : allWithInventory;
 
     // 7. Paginate the filtered results
-    const total = nonZero.length;
+    const total = filtered.length;
     const pageCount = Math.ceil(total / pageSize) || 1;
     const start = (page - 1) * pageSize;
-    const paginatedProducts = nonZero.slice(start, start + pageSize);
+    const paginatedProducts = filtered.slice(start, start + pageSize);
 
     return {
       data: paginatedProducts,
