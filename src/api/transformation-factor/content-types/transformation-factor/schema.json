@@ -19,12 +19,12 @@
     "sourceUnit": {
       "type": "enumeration",
       "required": true,
-      "enum": ["kg", "m", "unit", "piece"]
+      "enum": ["kg", "m", "unit", "piece", "und", "par"]
     },
     "destinationUnit": {
       "type": "enumeration",
       "required": true,
-      "enum": ["kg", "m", "unit", "piece"]
+      "enum": ["kg", "m", "unit", "piece", "und", "par"]
     },
     "factor": {
       "type": "decimal",

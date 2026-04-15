@@ -32,7 +32,7 @@
     "unit": {
       "type": "enumeration",
       "required": true,
-      "enum": ["kg", "m", "piece", "unit"]
+      "enum": ["kg", "m", "unit", "piece", "und", "par"]
     },
     "state": {
       "type": "enumeration",

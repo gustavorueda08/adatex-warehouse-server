@@ -7,12 +7,14 @@ const ITEM_STATES = require("../../../utils/itemStates");
 const ITEM_MOVEMENT_TYPES = require("../../../utils/itemMovementTypes");
 const logger = require("../../../utils/logger");
 
+const WAREHOUSE_TYPES = require("../../../utils/warehouseTypes");
 const {
   ORDER_PRODUCT_SERVICE,
   ITEM_SERVICE,
   PRODUCT_SERVICE,
   ORDER_SERVICE,
   CUSTOMER_SERVICE,
+  WAREHOUSE_SERVICE,
 } = require("../../../utils/services");
 
 const { withValidation } = require("../../../validation/withValidation");
@@ -32,6 +34,8 @@ const {
   updateExistingOrderProducts,
   syncOrderProducts,
   fastUnreserveSaleItem,
+  bulkReserveSaleItems,
+  bulkUnreserveFixedQtyItems,
   ORDER_POPULATE,
   ORDER_POPULATE_BASIC,
 } = require("../utils/orderHelpers");
@@ -39,6 +43,10 @@ const {
 const {
   ItemMovementStrategyFactory,
 } = require("../strategies/itemMovementStrategies");
+
+const {
+  validatePartialInvoiceOrder,
+} = require("../utils/invoiceHelpers");
 
 const COP_FMT = new Intl.NumberFormat("es-CO", {
   style: "currency",
@@ -188,9 +196,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         // Validaciones especiales para partial-invoice
         if (data.type === ORDER_TYPES.PARTIAL_INVOICE) {
-          const {
-            validatePartialInvoiceOrder,
-          } = require("../utils/invoiceHelpers");
           const validation = await validatePartialInvoiceOrder(data, { trx });
 
           if (!validation.valid) {
@@ -321,16 +326,18 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           ORDER_SERVICE,
           id,
           {
-            populate: [
-              "orderProducts",
-              "orderProducts.items",
-              "orderProducts.items.product",
-              "orderProducts.items.warehouse",
-              "orderProducts.product",
-              "destinationWarehouse",
-              "sourceWarehouse",
-              "customer",
-            ],
+            populate: {
+              orderProducts: {
+                populate: {
+                  product: true,
+                  // items omitted: loaded per-product via Knex in updateOrderProducts
+                  // to avoid WHERE id IN (100k IDs) crash with large fixedQty orders
+                },
+              },
+              destinationWarehouse: true,
+              sourceWarehouse: true,
+              customer: true,
+            },
             transacting: trx,
           },
         );
@@ -543,8 +550,10 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
       try {
         const { id } = data;
         const orderProductService = strapi.service(ORDER_PRODUCT_SERVICE);
+        const knexTrx = trx?.trx ?? trx ?? strapi.db.connection;
 
-        // Obtención del Order existente
+        // Load order WITHOUT items — avoids ORM crash for large fixedQty orders
+        // (ORM would generate WHERE id IN (45000 values) exceeding SQLite variable limit)
         const currentOrder = await strapi.entityService.findOne(
           ORDER_SERVICE,
           id,
@@ -552,7 +561,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             populate: [
               "orderProducts",
               "orderProducts.product",
-              "orderProducts.items",
               "sourceWarehouse",
             ],
             transacting: trx,
@@ -566,24 +574,78 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         // Validar que la orden pueda ser eliminada
         validateOrderIsEditable(currentOrder);
 
+        const isSaleOrOut =
+          currentOrder.type === ORDER_TYPES.SALE ||
+          currentOrder.type === ORDER_TYPES.OUT;
+
         // Eliminación de OrderProducts y sus Items
         await runInBatches(currentOrder.orderProducts, async (orderProduct) => {
-          const items = orderProduct.items;
+          const productType =
+            orderProduct.product?.type ?? "variableQuantityPerItem";
 
-          // Eliminar o revertir items
-          await runInBatches(
-            items,
-            (item) =>
-              strapi.service(ORDER_SERVICE).doItemMovement({
-                movementType: ITEM_MOVEMENT_TYPES.DELETE,
-                item,
-                order: currentOrder,
-                orderProduct,
-                product: orderProduct.product,
-                trx,
-              }),
-            1,
-          );
+          if (productType === "fixedQuantityPerItem" && isSaleOrOut) {
+            // Bulk unreserve via subquery — no ID loading needed, handles 100k+ items
+            // RESERVED → AVAILABLE + unlinks from order and orderProduct
+            await bulkUnreserveFixedQtyItems(strapi, {
+              orderProduct,
+              currentOrder,
+              trx,
+            });
+          } else if (productType === "cutItem") {
+            // cutItem DELETE needs parentItem + movements to restore the source item.
+            // Item counts are always small — safe to load via ORM.
+            const opWithItems = await strapi.entityService.findOne(
+              ORDER_PRODUCT_SERVICE,
+              orderProduct.id,
+              {
+                populate: ["items", "items.movements", "items.parentItem"],
+                transacting: trx,
+              },
+            );
+            await runInBatches(
+              opWithItems?.items ?? [],
+              (item) =>
+                strapi.service(ORDER_SERVICE).doItemMovement({
+                  movementType: ITEM_MOVEMENT_TYPES.DELETE,
+                  item,
+                  order: currentOrder,
+                  orderProduct,
+                  product: orderProduct.product,
+                  trx,
+                }),
+              1,
+            );
+          } else {
+            // variableQty or fixedQty for non-sale/out types.
+            // Load item IDs per orderProduct via Knex to stay within SQLite variable limits.
+            const itemLinks = await knexTrx("items_order_products_lnk")
+              .where("order_product_id", orderProduct.id)
+              .select("item_id");
+            const itemIds = itemLinks.map((r) => r.item_id);
+
+            if (itemIds.length > 0) {
+              const CHUNK = 500;
+              for (let c = 0; c < itemIds.length; c += CHUNK) {
+                const chunkIds = itemIds.slice(c, c + CHUNK);
+                const items = await knexTrx("items")
+                  .whereIn("id", chunkIds)
+                  .select("id", "state", "document_id");
+                await runInBatches(
+                  items,
+                  (item) =>
+                    strapi.service(ORDER_SERVICE).doItemMovement({
+                      movementType: ITEM_MOVEMENT_TYPES.DELETE,
+                      item,
+                      order: currentOrder,
+                      orderProduct,
+                      product: orderProduct.product,
+                      trx,
+                    }),
+                  1,
+                );
+              }
+            }
+          }
 
           // Eliminar OrderProduct
           await orderProductService.delete({ id: orderProduct.id, trx });
@@ -667,15 +729,17 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         case ITEM_MOVEMENT_TYPES.DELETE:
           if (product?.type === "cutItem") {
+            // Los cutItems se eliminan siempre con la lógica de Transform
+            // (necesitan restaurar el item fuente del que fueron cortados)
             const transformStrategy = ItemMovementStrategyFactory.getStrategy(
-              require("../../../utils/orderTypes").TRANSFORM,
+              ORDER_TYPES.TRANSFORM,
               itemService,
             );
             result = await transformStrategy.delete({
               item,
               order,
               orderProduct,
-              orderType: require("../../../utils/orderTypes").TRANSFORM,
+              orderType: ORDER_TYPES.TRANSFORM,
               parentItem,
               movements,
               trx,
@@ -740,38 +804,32 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
         // Guard: items from a zona franca warehouse cannot be added to sale orders.
         // They must first be nationalized to a regular stock warehouse.
         if (currentOrder.type === ORDER_TYPES.SALE) {
-          const WAREHOUSE_TYPES = require("../../../utils/warehouseTypes");
-          const { WAREHOUSE_SERVICE: WH_SERVICE } = require("../../../utils/services");
-          const FTZ = WAREHOUSE_TYPES.FREE_TRADE_ZONE;
           const FTZ_ERROR =
             "No se pueden agregar items de una bodega zona franca a una orden de venta. " +
             "Primero debe nacionalizar la mercancía.";
 
-          // Check by explicit warehouse id (quantity+product lookup path)
+          // Verificar por ID de bodega explícito (búsqueda por quantity+product)
           const itemWarehouseId = item?.warehouse || currentOrder.sourceWarehouse?.id;
           if (itemWarehouseId) {
-            const wh = await strapi.entityService.findOne(WH_SERVICE, itemWarehouseId, {
+            const wh = await strapi.entityService.findOne(WAREHOUSE_SERVICE, itemWarehouseId, {
               transacting: trx,
             });
-            if (wh?.type === FTZ) throw new Error(FTZ_ERROR);
+            if (wh?.type === WAREHOUSE_TYPES.FREE_TRADE_ZONE) throw new Error(FTZ_ERROR);
           }
 
-          // Check by item id (direct id/barcode lookup path)
+          // Verificar por ID de item (búsqueda directa por id/barcode)
           if (item?.id) {
             const existingItem = await strapi.entityService.findOne(ITEM_SERVICE, item.id, {
               populate: ["warehouse"],
               transacting: trx,
             });
-            if (existingItem?.warehouse?.type === FTZ) throw new Error(FTZ_ERROR);
+            if (existingItem?.warehouse?.type === WAREHOUSE_TYPES.FREE_TRADE_ZONE) throw new Error(FTZ_ERROR);
           }
         }
 
-        // Auto-transition DRAFT to CONFIRMED for sale and out orders
-        if (
-          currentOrder.state === ORDER_STATES.DRAFT &&
-          (currentOrder.type === ORDER_TYPES.SALE ||
-            currentOrder.type === ORDER_TYPES.OUT)
-        ) {
+        // Auto-transition DRAFT → CONFIRMED when items are added, regardless of order type.
+        // addItem represents user intent to start filling the order.
+        if (currentOrder.state === ORDER_STATES.DRAFT) {
           currentOrder.state = ORDER_STATES.CONFIRMED;
           await strapi.entityService.update(ORDER_SERVICE, currentOrder.id, {
             data: { state: currentOrder.state },
@@ -806,7 +864,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
         // Siempre obtener el producto completo para tener las relaciones necesarias (parentProduct, transformationFactor)
         const product = await strapi.entityService.findOne(
-          require("../../../utils/services").PRODUCT_SERVICE,
+          PRODUCT_SERVICE,
           productId,
           {
             populate: ["parentProduct", "transformationFactor"],
@@ -887,13 +945,13 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
           let filters = {
             product: product.id,
-            state: require("../../../utils/itemStates").AVAILABLE,
+            state: ITEM_STATES.AVAILABLE,
           };
           const whId = resolveWarehouse();
           if (whId) filters.warehouse = whId;
 
           const availableItems = await strapi.entityService.findMany(
-            require("../../../utils/services").ITEM_SERVICE,
+            ITEM_SERVICE,
             {
               filters,
               limit: item.count,
@@ -907,20 +965,40 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             );
           }
 
-          for (const aItem of availableItems) {
-            const addedItem = await strapi
-              .service(ORDER_SERVICE)
-              .doItemMovement({
-                movementType: ITEM_MOVEMENT_TYPES.CREATE,
-                item: aItem,
-                order: currentOrder,
-                orderProduct,
-                product,
-                orderState: currentOrder.state,
-                trx,
-              });
-            addedItemsList.push(addedItem);
+          // replace: true → unreserve all existing items first, then re-reserve with new count.
+          // Allows "set quantity" UX: user types a number and the reservation is replaced atomically.
+          if (item.replace) {
+            await bulkUnreserveFixedQtyItems(strapi, { orderProduct, currentOrder, trx });
           }
+
+          await bulkReserveSaleItems(strapi, {
+            items: availableItems,
+            currentOrder,
+            orderProduct,
+            trx,
+          });
+
+          await orderProductService.update({
+            id: orderProduct.id,
+            orderState: currentOrder.state,
+            trx,
+          });
+
+          strapi.io
+            ?.to(`order:${currentOrder.id}`)
+            .emit("order:item-added", {
+              bulkCount: availableItems.length,
+              product: product.id,
+              orderProductId: orderProduct.id,
+            });
+
+          logger.debug(`Bulk items reserved for sale order`, {
+            orderId: currentOrder.id,
+            count: availableItems.length,
+            product: product.id,
+          });
+
+          return { count: availableItems.length, product: product.id };
         } else if (
           product.type === "cutItem" &&
           (item.quantity !== undefined || item.quantities !== undefined)
@@ -965,7 +1043,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           }
 
           const smartCutWarehouses = await strapi.entityService.findMany(
-            require("../../../utils/services").WAREHOUSE_SERVICE,
+            WAREHOUSE_SERVICE,
             {
               filters: {
                 type: cutWarehouseFilter,
@@ -992,11 +1070,11 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
 
             // Fetch enough available parent items to potentially fulfill the request
             const availableParentItems = await strapi.entityService.findMany(
-              require("../../../utils/services").ITEM_SERVICE,
+              ITEM_SERVICE,
               {
                 filters: {
                   product: product.parentProduct.id,
-                  state: require("../../../utils/itemStates").AVAILABLE,
+                  state: ITEM_STATES.AVAILABLE,
                   warehouse: { $in: smartCutWhIds },
                 },
                 sort: { currentQuantity: "desc" },
@@ -1066,11 +1144,10 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
             }
 
             // Create ONE cutItem for the entire requested targetQty, mapping the multiple consumed sources
-            const transformStrategy =
-              require("../strategies/itemMovementStrategies").ItemMovementStrategyFactory.getStrategy(
-                require("../../../utils/orderTypes").TRANSFORM,
-                strapi.service(require("../../../utils/services").ITEM_SERVICE),
-              );
+            const transformStrategy = ItemMovementStrategyFactory.getStrategy(
+              ORDER_TYPES.TRANSFORM,
+              strapi.service(ITEM_SERVICE),
+            );
 
             const newCutItem = await transformStrategy.create({
               item: {
@@ -1084,7 +1161,7 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
               order: currentOrder,
               orderProduct: orderProduct,
               trx,
-              orderType: require("../../../utils/orderTypes").TRANSFORM,
+              orderType: ORDER_TYPES.TRANSFORM,
               product: product,
               parentItem: null,
             });
@@ -1159,11 +1236,14 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
           ORDER_SERVICE,
           id,
           {
-            populate: [
-              "orderProducts",
-              "orderProducts.product",
-              "orderProducts.items",
-            ],
+            populate: {
+              orderProducts: {
+                populate: {
+                  items: { fields: ["id", "state"] },
+                  product: true,
+                },
+              },
+            },
             transacting: trx,
           },
         );
@@ -1551,8 +1631,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
    * @returns {Promise<Array>} Lista de items AVAILABLE agrupados por producto.
    */
   async getNationalizableItems(purchaseOrderId) {
-    const WAREHOUSE_TYPES = require("../../../utils/warehouseTypes");
-
     const purchaseOrder = await strapi.entityService.findOne(
       ORDER_SERVICE,
       purchaseOrderId,
@@ -1637,9 +1715,6 @@ module.exports = createCoreService("api::order.order", ({ strapi }) => ({
     products,
     notes,
   }) {
-    const WAREHOUSE_TYPES = require("../../../utils/warehouseTypes");
-    const { WAREHOUSE_SERVICE } = require("../../../utils/services");
-
     return await strapi.db.transaction(async (trx) => {
       // 1. Validar la orden de compra origen
       const purchaseOrder = await strapi.entityService.findOne(

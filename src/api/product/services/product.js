@@ -328,6 +328,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
     return {
       order: order.id,
       orderCode: order.code || null,
+      orderType: order.type || null,
       quantity,
       customer: customer
         ? [customer.name, customer.lastName].filter(Boolean).join(" ")
@@ -367,9 +368,15 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         production: [],
         transit: [],
         required: [],
+        freeTradeZone: [],
+        reserved: [],
       };
 
       // ── Items (physical) ──
+      // Accumulate physical-item quantities grouped by (sourceOrder.id, wType) so
+      // one purchase order does not produce dozens of breakdown rows.
+      const sourceOrderGroups = {}; // key: `${sourceOrder.id}_${wType}`
+
       if (product.items?.length > 0) {
         product.items.forEach((item) => {
           const qty = Number(item.currentQuantity) || 0;
@@ -400,22 +407,76 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           } else if (wType === "freeTradeZone") {
             // Zona franca items are tracked separately — NOT included in operational stock
             stats.freeTradeZone += qty;
+            // Accumulate for breakdown
+            if (item.sourceOrder) {
+              const key = `${item.sourceOrder.id}_freeTradeZone`;
+              if (!sourceOrderGroups[key]) {
+                sourceOrderGroups[key] = {
+                  order: item.sourceOrder,
+                  qty: 0,
+                  wType: "freeTradeZone",
+                };
+              }
+              sourceOrderGroups[key].qty += qty;
+            }
           } else if (wType === "production") {
             stats.production += qty;
+            if (item.sourceOrder) {
+              const key = `${item.sourceOrder.id}_production`;
+              if (!sourceOrderGroups[key]) {
+                sourceOrderGroups[key] = {
+                  order: item.sourceOrder,
+                  qty: 0,
+                  wType: "production",
+                };
+              }
+              sourceOrderGroups[key].qty += qty;
+            }
           } else if (wType === "transit") {
             stats.transit += qty;
+            if (item.sourceOrder) {
+              const key = `${item.sourceOrder.id}_transit`;
+              if (!sourceOrderGroups[key]) {
+                sourceOrderGroups[key] = {
+                  order: item.sourceOrder,
+                  qty: 0,
+                  wType: "transit",
+                };
+              }
+              sourceOrderGroups[key].qty += qty;
+            }
           } else if (wType === "defective") {
             stats.defective += qty;
           }
         });
       }
 
-      // ── OrderProducts (draft orders only) ──
+      // Push aggregated physical-item entries into the breakdown arrays
+      Object.values(sourceOrderGroups).forEach(({ order, qty, wType }) => {
+        breakdown[wType].push(this._buildBreakdownEntry(order, qty));
+      });
+
+      // ── OrderProducts (draft orders — required/production/transit; confirmed/processing — reserved) ──
       if (product.orderProducts?.length > 0) {
         product.orderProducts.forEach((op) => {
           const requested = Number(op.requestedQuantity) || 0;
           const order = op.order;
-          if (!order || order.state !== "draft") return;
+          if (!order) return;
+
+          // Confirmed / processing sale orders → reserved breakdown
+          if (order.state === "confirmed" || order.state === "processing") {
+            const isSourceStockLike = [
+              "stock",
+              "smartCut",
+              "printlab",
+            ].includes(order.sourceWarehouse?.type);
+            if (order.type === "sale" && isSourceStockLike) {
+              breakdown.reserved.push(this._buildBreakdownEntry(order, requested));
+            }
+            return;
+          }
+
+          if (order.state !== "draft") return;
 
           const entry = this._buildBreakdownEntry(order, requested);
 
@@ -516,13 +577,17 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           },
           createdAt: { $lte: queryDate },
         },
-        populate: [
-          "item",
-          "item.product",
-          "sourceWarehouse",
-          "destinationWarehouse",
-          "order",
-        ],
+        populate: {
+          item: { populate: { product: { fields: ["id"] } } },
+          sourceWarehouse: { fields: ["id"] },
+          destinationWarehouse: { fields: ["id"] },
+          order: {
+            fields: ["code", "type", "estimatedCompletedDate"],
+            populate: {
+              customer: { fields: ["name", "lastName"] },
+            },
+          },
+        },
         sort: { createdAt: "asc" }, // Process in chronological order
         limit: -1, // Fetch all
       },
@@ -594,12 +659,21 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           currentItemState.state = "reserved";
           if (mov.order) {
             currentItemState.orderType = mov.order.type;
+            currentItemState.orderId = mov.order.id;
+            currentItemState.orderCode = mov.order.code || null;
+            currentItemState.orderCustomer = mov.order.customer || null;
+            currentItemState.orderEstDate =
+              mov.order.estimatedCompletedDate || null;
           }
           break;
 
         case UNRESERVE:
           currentItemState.state = "available";
           currentItemState.orderType = null;
+          currentItemState.orderId = null;
+          currentItemState.orderCode = null;
+          currentItemState.orderCustomer = null;
+          currentItemState.orderEstDate = null;
           break;
 
         // ADJUSTMENT doesn't change warehouse usually, just quantity
@@ -627,7 +701,13 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
     const productBreakdown = {};
     productIds.forEach((pid) => {
-      productBreakdown[pid] = { production: [], transit: [], required: [] };
+      productBreakdown[pid] = {
+        production: [],
+        transit: [],
+        required: [],
+        freeTradeZone: [],
+        reserved: [],
+      };
     });
 
     Object.values(itemStates).forEach((itemState) => {
@@ -644,6 +724,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
       const isStockLike = ["stock", "smartCut", "printlab"].includes(wType);
 
+      const bd = productBreakdown[itemState.productId];
+
       if (isStockLike) {
         if (itemState.state === "available") {
           stats[wType] += qty;
@@ -655,6 +737,30 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
           ) {
             stats[wType] += qty;
             stats.reserved += qty;
+            // Build reserved breakdown: group by orderId to avoid one row per item
+            if (bd && itemState.orderId) {
+              const existing = bd.reserved.find(
+                (e) => e.order === itemState.orderId,
+              );
+              if (existing) {
+                existing.quantity += qty;
+              } else {
+                const customer = itemState.orderCustomer;
+                bd.reserved.push({
+                  order: itemState.orderId,
+                  orderCode: itemState.orderCode,
+                  orderType: itemState.orderType,
+                  quantity: qty,
+                  customer: customer
+                    ? [customer.name, customer.lastName]
+                        .filter(Boolean)
+                        .join(" ")
+                    : null,
+                  supplier: null,
+                  estimatedCompletedDate: itemState.orderEstDate,
+                });
+              }
+            }
           } else {
             stats[wType] += qty;
           }
@@ -777,6 +883,8 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         production: [],
         transit: [],
         required: [],
+        freeTradeZone: [],
+        reserved: [],
       };
 
       return { ...product, inventory: { ...stats, breakdown } };
@@ -830,9 +938,15 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         transit: [],
         arriving: [],
         required: [],
+        freeTradeZone: [],
+        reserved: [],
       };
 
       // ── Items (physical) ──
+      // Accumulate physical-item quantities grouped by (sourceOrder.id, bucket) to
+      // avoid one breakdown row per item.
+      const sourceOrderGroupsProj = {}; // key: `${sourceOrder.id}_${bucket}`
+
       if (product.items?.length > 0) {
         product.items.forEach((item) => {
           const qty = Number(item.currentQuantity) || 0;
@@ -862,19 +976,85 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
             }
           } else if (wType === "freeTradeZone") {
             stats.freeTradeZone += qty;
+            if (sourceOrder) {
+              const key = `${sourceOrder.id}_freeTradeZone`;
+              if (!sourceOrderGroupsProj[key]) {
+                sourceOrderGroupsProj[key] = {
+                  order: sourceOrder,
+                  qty: 0,
+                  bucket: "freeTradeZone",
+                };
+              }
+              sourceOrderGroupsProj[key].qty += qty;
+            }
           } else if (wType === "production") {
             if (isWithinRange(estCompleted)) {
               stats.arriving += qty;
+              if (sourceOrder) {
+                const key = `${sourceOrder.id}_arriving`;
+                if (!sourceOrderGroupsProj[key]) {
+                  sourceOrderGroupsProj[key] = {
+                    order: sourceOrder,
+                    qty: 0,
+                    bucket: "arriving",
+                  };
+                }
+                sourceOrderGroupsProj[key].qty += qty;
+              }
             } else if (isWithinRange(estTransit)) {
               stats.transit += qty;
+              if (sourceOrder) {
+                const key = `${sourceOrder.id}_transit`;
+                if (!sourceOrderGroupsProj[key]) {
+                  sourceOrderGroupsProj[key] = {
+                    order: sourceOrder,
+                    qty: 0,
+                    bucket: "transit",
+                  };
+                }
+                sourceOrderGroupsProj[key].qty += qty;
+              }
             } else if (isAfterRange(estCompleted)) {
               stats.production += qty;
+              if (sourceOrder) {
+                const key = `${sourceOrder.id}_production`;
+                if (!sourceOrderGroupsProj[key]) {
+                  sourceOrderGroupsProj[key] = {
+                    order: sourceOrder,
+                    qty: 0,
+                    bucket: "production",
+                  };
+                }
+                sourceOrderGroupsProj[key].qty += qty;
+              }
             }
           } else if (wType === "transit") {
             if (isWithinRange(estCompleted)) {
               stats.arriving += qty;
+              if (sourceOrder) {
+                const key = `${sourceOrder.id}_arriving`;
+                if (!sourceOrderGroupsProj[key]) {
+                  sourceOrderGroupsProj[key] = {
+                    order: sourceOrder,
+                    qty: 0,
+                    bucket: "arriving",
+                  };
+                }
+                sourceOrderGroupsProj[key].qty += qty;
+              }
             } else if (isAfterRange(estCompleted)) {
               stats.transit += qty;
+              if (sourceOrder) {
+                const key = `${sourceOrder.id}_transit`;
+                if (!sourceOrderGroupsProj[key]) {
+                  sourceOrderGroupsProj[key] = {
+                    order: sourceOrder,
+                    qty: 0,
+                    bucket: "transit",
+                  };
+                }
+                sourceOrderGroupsProj[key].qty += qty;
+              }
             }
           } else if (wType === "defective") {
             stats.defective += qty;
@@ -882,12 +1062,32 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
         });
       }
 
-      // ── OrderProducts (draft orders only) ──
+      // Push aggregated physical-item entries into the breakdown arrays
+      Object.values(sourceOrderGroupsProj).forEach(({ order, qty, bucket }) => {
+        breakdown[bucket].push(this._buildBreakdownEntry(order, qty));
+      });
+
+      // ── OrderProducts (draft + confirmed/processing for reserved) ──
       if (product.orderProducts?.length > 0) {
         product.orderProducts.forEach((op) => {
           const requested = Number(op.requestedQuantity) || 0;
           const order = op.order;
-          if (!order || order.state !== "draft") return;
+          if (!order) return;
+
+          // Confirmed / processing sale orders → reserved breakdown
+          if (order.state === "confirmed" || order.state === "processing") {
+            const isSourceStockLike = [
+              "stock",
+              "smartCut",
+              "printlab",
+            ].includes(order.sourceWarehouse?.type);
+            if (order.type === "sale" && isSourceStockLike) {
+              breakdown.reserved.push(this._buildBreakdownEntry(order, requested));
+            }
+            return;
+          }
+
+          if (order.state !== "draft") return;
 
           const estCompleted = order.estimatedCompletedDate;
           const estTransit = order.estimatedTransitDate;
@@ -966,25 +1166,12 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
    */
   async findWithInventory(params = {}) {
     // 1. Define required relations for inventory calculation.
-    //    Note: item schema has no bare "order" field (only sourceOrder / orders),
-    //    so it is intentionally absent here to avoid findMany ValidationErrors.
+    //    Items are intentionally excluded from inventoryPopulate here — they are loaded
+    //    via raw SQL JOINs below to avoid SQLite's bind-variable limit when a
+    //    fixedQuantityPerItem product has tens of thousands of items.
+    //    (Strapi ORM batches relation loading as WHERE item_id IN (...all IDs...) which
+    //    crashes SQLite when there are > ~999 items across all loaded products.)
     const inventoryPopulate = {
-      items: {
-        fields: ["currentQuantity", "state"],
-        populate: {
-          warehouse: {
-            fields: ["type"],
-          },
-          sourceOrder: {
-            fields: ["estimatedCompletedDate", "estimatedTransitDate"],
-            populate: {
-              destinationWarehouse: {
-                fields: ["type"],
-              },
-            },
-          },
-        },
-      },
       orderProducts: {
         fields: ["requestedQuantity", "state"],
         populate: {
@@ -1079,11 +1266,7 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
 
     const mergedPopulate = {
       ...userPopulate,
-      ...inventoryPopulate,
-      items: {
-        ...(userPopulate.items === true ? {} : userPopulate.items || {}),
-        ...inventoryPopulate.items,
-      },
+      // items are intentionally excluded — loaded via raw SQL below
       orderProducts: {
         ...(userPopulate.orderProducts === true
           ? {}
@@ -1092,16 +1275,121 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
       },
     };
 
-    // 4. Load ALL matching products with inventory relations.
-    //    We must calculate inventory for every product before we can know which
-    //    ones have non-zero stock, so we cannot paginate at the DB level here.
-    //    For typical warehouse catalogues (< 10 000 products) this is fast.
+    // 4. Load ALL matching products with inventory relations (no items — loaded below).
     const allProducts = await strapi.entityService.findMany(SERVICE_UID, {
       ...otherParams,
       filters: baseFilters,
       sort: otherParams.sort || params.sort || "name:asc",
       populate: mergedPopulate,
     });
+
+    // 4b. Attach items to each product via raw SQL JOINs, avoiding Strapi's
+    //     "WHERE item_id IN (...all IDs...)" pattern that crashes SQLite when a
+    //     fixedQuantityPerItem product has tens of thousands of items.
+    if (allProducts.length > 0) {
+      const knex = strapi.db.connection;
+
+      // Separate fixed vs normal products
+      const fixedIds = allProducts
+        .filter((p) => p.type === "fixedQuantityPerItem")
+        .map((p) => p.id);
+      const normalIds = allProducts
+        .filter((p) => p.type !== "fixedQuantityPerItem")
+        .map((p) => p.id);
+
+      // Build a map for quick access: productId → product object
+      const productMap = new Map(allProducts.map((p) => [p.id, p]));
+      // Initialise items array on every product
+      allProducts.forEach((p) => { p.items = []; });
+
+      // --- Fixed products: COUNT(*) aggregated by (product_id, state, warehouse_type) ---
+      if (fixedIds.length > 0) {
+        const fixedRows = await knex("items as i")
+          .select(
+            "ipl.product_id",
+            "i.state",
+            knex.raw("w.type as wtype"),
+            knex.raw("COUNT(*) as cnt"),
+          )
+          .join("items_product_lnk as ipl", "ipl.item_id", "i.id")
+          .leftJoin("items_warehouse_lnk as iwl", "iwl.item_id", "i.id")
+          .leftJoin("warehouses as w", "w.id", "iwl.warehouse_id")
+          .whereIn("ipl.product_id", fixedIds)
+          .groupBy("ipl.product_id", "i.state", "w.type");
+
+        fixedRows.forEach((row) => {
+          const product = productMap.get(row.product_id);
+          if (!product) return;
+          const qty = Number(row.cnt) * (product.unitsPerPackage || 1);
+          product.items.push({
+            state: row.state,
+            currentQuantity: qty,
+            warehouse: row.wtype ? { type: row.wtype } : null,
+            sourceOrder: null,
+          });
+        });
+      }
+
+      // --- Normal products: full item rows with warehouse + sourceOrder via JOINs ---
+      if (normalIds.length > 0) {
+        const normalRows = await knex("items as i")
+          .select(
+            "ipl.product_id",
+            "i.state",
+            knex.raw("i.current_quantity as current_quantity"),
+            knex.raw("w.type as wtype"),
+            knex.raw("so.id as so_id"),
+            knex.raw("so.code as so_code"),
+            knex.raw("so.type as so_type"),
+            knex.raw("so.estimated_completed_date as so_ecd"),
+            knex.raw("so.estimated_transit_date as so_etd"),
+            knex.raw("dw.type as dest_wtype"),
+            knex.raw("sup.name as sup_name"),
+            knex.raw("sup.lastname as sup_lastname"),
+          )
+          .join("items_product_lnk as ipl", "ipl.item_id", "i.id")
+          .leftJoin("items_warehouse_lnk as iwl", "iwl.item_id", "i.id")
+          .leftJoin("warehouses as w", "w.id", "iwl.warehouse_id")
+          .leftJoin("items_source_order_lnk as isol", "isol.item_id", "i.id")
+          .leftJoin("orders as so", "so.id", "isol.order_id")
+          .leftJoin(
+            "orders_destination_warehouse_lnk as odwl",
+            "odwl.order_id",
+            "so.id",
+          )
+          .leftJoin("warehouses as dw", "dw.id", "odwl.warehouse_id")
+          .leftJoin("orders_supplier_lnk as osl", "osl.order_id", "so.id")
+          .leftJoin("suppliers as sup", "sup.id", "osl.supplier_id")
+          .whereIn("ipl.product_id", normalIds);
+
+        normalRows.forEach((row) => {
+          const product = productMap.get(row.product_id);
+          if (!product) return;
+          product.items.push({
+            state: row.state,
+            currentQuantity: Number(row.current_quantity) || 0,
+            warehouse: row.wtype ? { type: row.wtype } : null,
+            sourceOrder: row.so_id
+              ? {
+                  id: row.so_id,
+                  code: row.so_code,
+                  type: row.so_type,
+                  estimatedCompletedDate: row.so_ecd,
+                  estimatedTransitDate: row.so_etd,
+                  destinationWarehouse: row.dest_wtype
+                    ? { type: row.dest_wtype }
+                    : null,
+                  supplier:
+                    row.sup_name || row.sup_lastname
+                      ? { name: row.sup_name, lastname: row.sup_lastname }
+                      : null,
+                }
+              : null,
+          });
+        });
+      }
+
+    }
 
     // 5. Calculate inventory based on mode
     let allWithInventory;
@@ -1166,60 +1454,88 @@ module.exports = createCoreService(SERVICE_UID, ({ strapi }) => ({
   async findInventoryAll(params = {}) {
     const { collection } = params;
 
-    // 1. Define required relations for inventory calculation
-    const inventoryPopulate = {
-      items: {
-        fields: ["currentQuantity", "state"],
-        populate: {
-          warehouse: {
-            fields: ["type"],
-          },
-        },
-      },
-      orderProducts: {
-        fields: ["requestedQuantity", "state"],
-        populate: {
-          items: {
-            fields: ["id"],
-          },
-          order: {
-            fields: ["type"],
-            populate: {
-              destinationWarehouse: {
-                fields: ["type"],
+    // 1. Build query (items loaded via raw SQL below — see findWithInventory for rationale)
+    const query = {
+      populate: {
+        orderProducts: {
+          fields: ["requestedQuantity", "state"],
+          populate: {
+            order: {
+              fields: ["type"],
+              populate: {
+                destinationWarehouse: { fields: ["type"] },
               },
             },
           },
         },
       },
-    };
-
-    // 2. Build query
-    const query = {
-      populate: inventoryPopulate,
-      sort: "name:asc", // Default sort
+      sort: "name:asc",
     };
 
     if (collection) {
-      query.filters = {
-        collections: {
-          id: collection,
-        },
-      };
+      query.filters = { collections: { id: collection } };
     }
 
-    // 3. Fetch all data
+    // 2. Fetch all products (without items)
     const results = await strapi.entityService.findMany(SERVICE_UID, query);
 
+    // 3. Attach items via raw SQL JOINs to avoid SQLite variable limit
+    if (results.length > 0) {
+      const knex = strapi.db.connection;
+      const productMap = new Map(results.map((p) => [p.id, p]));
+      results.forEach((p) => { p.items = []; });
+
+      const fixedIds = results.filter((p) => p.type === "fixedQuantityPerItem").map((p) => p.id);
+      const normalIds = results.filter((p) => p.type !== "fixedQuantityPerItem").map((p) => p.id);
+
+      if (fixedIds.length > 0) {
+        const rows = await knex("items as i")
+          .select("ipl.product_id", "i.state", knex.raw("w.type as wtype"), knex.raw("COUNT(*) as cnt"))
+          .join("items_product_lnk as ipl", "ipl.item_id", "i.id")
+          .leftJoin("items_warehouse_lnk as iwl", "iwl.item_id", "i.id")
+          .leftJoin("warehouses as w", "w.id", "iwl.warehouse_id")
+          .whereIn("ipl.product_id", fixedIds)
+          .groupBy("ipl.product_id", "i.state", "w.type");
+
+        rows.forEach((row) => {
+          const product = productMap.get(row.product_id);
+          if (!product) return;
+          product.items.push({
+            state: row.state,
+            currentQuantity: Number(row.cnt) * (product.unitsPerPackage || 1),
+            warehouse: row.wtype ? { type: row.wtype } : null,
+            sourceOrder: null,
+          });
+        });
+      }
+
+      if (normalIds.length > 0) {
+        const rows = await knex("items as i")
+          .select(
+            "ipl.product_id", "i.state",
+            knex.raw("i.current_quantity as current_quantity"),
+            knex.raw("w.type as wtype"),
+          )
+          .join("items_product_lnk as ipl", "ipl.item_id", "i.id")
+          .leftJoin("items_warehouse_lnk as iwl", "iwl.item_id", "i.id")
+          .leftJoin("warehouses as w", "w.id", "iwl.warehouse_id")
+          .whereIn("ipl.product_id", normalIds);
+
+        rows.forEach((row) => {
+          const product = productMap.get(row.product_id);
+          if (!product) return;
+          product.items.push({
+            state: row.state,
+            currentQuantity: Number(row.current_quantity) || 0,
+            warehouse: row.wtype ? { type: row.wtype } : null,
+            sourceOrder: null,
+          });
+        });
+      }
+    }
+
     // 4. Calculate inventory
-    // We pass empty userPopulate because for this specific endpoint we only care about inventory
-    // and we don't support dynamic populate from client for simplicity/performance in this "all" endpoint
-    // unless requested, but requirements said "just return array of products with inventory".
-    // So we will strip items/orderProducts by default to keep response clean.
-    const productsWithInventory = this.calculateInventoryForProducts(
-      results,
-      {},
-    );
+    const productsWithInventory = this.calculateInventoryForProducts(results, {});
 
     return productsWithInventory.filter((p) => {
       const inv = p.inventory;

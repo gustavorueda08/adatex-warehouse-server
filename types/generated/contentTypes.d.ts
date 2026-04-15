@@ -779,7 +779,9 @@ export interface ApiItemItem extends Struct.CollectionTypeSchema {
       'api::item.item'
     >;
     transformedItems: Schema.Attribute.Relation<'oneToMany', 'api::item.item'>;
-    unit: Schema.Attribute.Enumeration<['kg', 'm', 'piece', 'unit']> &
+    unit: Schema.Attribute.Enumeration<
+      ['kg', 'm', 'unit', 'piece', 'und', 'par']
+    > &
       Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -1300,7 +1302,7 @@ export interface ApiTransformationFactorTransformationFactor
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     destinationUnit: Schema.Attribute.Enumeration<
-      ['kg', 'm', 'unit', 'piece']
+      ['kg', 'm', 'unit', 'piece', 'und', 'par']
     > &
       Schema.Attribute.Required;
     factor: Schema.Attribute.Decimal & Schema.Attribute.Required;
@@ -1313,7 +1315,9 @@ export interface ApiTransformationFactorTransformationFactor
     name: Schema.Attribute.String & Schema.Attribute.Required;
     products: Schema.Attribute.Relation<'oneToMany', 'api::product.product'>;
     publishedAt: Schema.Attribute.DateTime;
-    sourceUnit: Schema.Attribute.Enumeration<['kg', 'm', 'unit', 'piece']> &
+    sourceUnit: Schema.Attribute.Enumeration<
+      ['kg', 'm', 'unit', 'piece', 'und', 'par']
+    > &
       Schema.Attribute.Required;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &

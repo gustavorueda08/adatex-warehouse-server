@@ -2,18 +2,57 @@
 
 const path = require("path");
 const fs = require("fs/promises");
-const { createCanvas, Image } = require("canvas");
 const { jsPDF } = require("jspdf");
 const { autoTable } = require("jspdf-autotable");
 const moment = require("moment-timezone");
 
 /**
  * jsPDF y jspdf-autotable asumen la existencia de objetos DOM.
- * Cuando corremos en Node, creamos los stubs mínimos para que funcionen.
+ * Cuando corremos en Node, creamos los stubs mínimos para que funcionen
+ * sin depender del paquete nativo `canvas`.
  */
+class MinimalCanvas {
+  constructor(width = 1, height = 1) {
+    this.width = width;
+    this.height = height;
+  }
+  getContext() {
+    return {
+      canvas: this,
+      fillRect() {},
+      clearRect() {},
+      getImageData() { return { data: [] }; },
+      putImageData() {},
+      createImageData() { return []; },
+      setTransform() {},
+      drawImage() {},
+      save() {},
+      fillText() {},
+      restore() {},
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      closePath() {},
+      stroke() {},
+      translate() {},
+      scale() {},
+      rotate() {},
+      arc() {},
+      fill() {},
+      measureText() { return { width: 0 }; },
+      transform() {},
+      rect() {},
+      clip() {},
+    };
+  }
+  toDataURL() { return ""; }
+}
+
+class MinimalImage {}
+
 if (typeof globalThis.document === "undefined") {
   globalThis.document = {
-    createElement: () => createCanvas(1, 1),
+    createElement: () => new MinimalCanvas(1, 1),
   };
 }
 
@@ -22,11 +61,11 @@ if (typeof globalThis.window === "undefined") {
 }
 
 if (typeof globalThis.HTMLCanvasElement === "undefined") {
-  globalThis.HTMLCanvasElement = createCanvas().constructor;
+  globalThis.HTMLCanvasElement = MinimalCanvas;
 }
 
 if (typeof globalThis.HTMLImageElement === "undefined") {
-  globalThis.HTMLImageElement = Image;
+  globalThis.HTMLImageElement = MinimalImage;
 }
 
 /**

@@ -109,38 +109,90 @@ const classifyItems = (currentItems, requestedItems) => {
 };
 
 /**
- * Populates estándar para órdenes
+ * Populates estándar para órdenes.
+ *
+ * IMPORTANT: Uses object format (not array) so that `items` is loaded with
+ * scalar `fields` only and NO `populate` sub-key. This prevents Strapi from
+ * running `WHERE item_id IN (all IDs)` for warehouse/product sub-relations,
+ * which crashes SQLite when an order has >999 items.
+ *
+ * Array format like `["orderProducts.items"]` silently sets `items: true`
+ * which auto-loads ALL direct sub-relations of Item — that is the root cause
+ * of the "too many SQL variables" error with 50k+ items.
  */
-const ORDER_POPULATE = [
-  "orderProducts",
-  "orderProducts.items",
-  "orderProducts.items.warehouse",
-  "orderProducts.product",
-  "orderProducts.product.parentProduct",
-  "sourceWarehouse",
-  "destinationWarehouse",
-  "customer",
-  "customer.taxes",
-  "customer.prices",
-  "customer.prices.product",
-  "customerForInvoice",
-  "customerForInvoice.taxes",
-  "customerForInvoice.prices",
-  "customerForInvoice.prices.product",
-  "supplier",
-  "generatedBy",
-  "movements",
-];
+const ORDER_POPULATE = {
+  orderProducts: {
+    populate: {
+      items: {
+        fields: [
+          "id",
+          "state",
+          "currentQuantity",
+          "unit",
+          "lotNumber",
+          "itemNumber",
+          "barcode",
+          "alternativeBarcode",
+          "cost",
+          "isInvoiced",
+          "cbm",
+          "weight",
+          "isPartition",
+          "partitionNumber",
+          "qualityStatus",
+          "qualityNotes",
+          "receiptDate",
+        ],
+      },
+      product: {
+        populate: { parentProduct: true },
+      },
+    },
+  },
+  sourceWarehouse: true,
+  destinationWarehouse: true,
+  customer: {
+    populate: {
+      taxes: true,
+      prices: { populate: { product: true } },
+    },
+  },
+  customerForInvoice: {
+    populate: {
+      taxes: true,
+      prices: { populate: { product: true } },
+    },
+  },
+  supplier: true,
+  generatedBy: true,
+  // movements: SE OMITE INTENCIONALMENTE
+  //
+  // order.movements es una relación oneToMany hacia inventory_movements (todas las
+  // entradas del log de inventario vinculadas a esta orden). Con órdenes grandes
+  // (p. ej. 50k items fixedQuantityPerItem) cada item genera 1 movimiento → la
+  // orden acumula 50k+ movimientos en inventory_movements_order_lnk.
+  //
+  // Incluirlos en ORDER_POPULATE significaría cargar y serializar 50k filas en
+  // CADA respuesta de API (create, update, findOne, WebSocket emit). Eso:
+  //   1. Añade segundos de latencia por serialización
+  //   2. Aumenta el payload de red en megabytes innecesarios
+  //   3. No rompe nada: ningún consumer del resultado (frontend, estrategias,
+  //      facturas Siigo) lee order.movements de la respuesta de API.
+  //
+  // Si en el futuro se necesita el historial de movimientos de una orden, se debe
+  // cargar bajo demanda en un endpoint propio (GET /orders/:id/movements) con
+  // paginación, no en el populate estándar.
+};
 
-const ORDER_POPULATE_BASIC = [
-  "destinationWarehouse",
-  "sourceWarehouse",
-  "customer",
-  "customerForInvoice",
-  "supplier",
-  "generatedBy",
-  "orderProducts",
-];
+const ORDER_POPULATE_BASIC = {
+  destinationWarehouse: true,
+  sourceWarehouse: true,
+  customer: true,
+  customerForInvoice: true,
+  supplier: true,
+  generatedBy: true,
+  orderProducts: true,
+};
 
 // Importaciones adicionales para las funciones auxiliares
 const runInBatches = require("../../../utils/runInBatches");
@@ -198,27 +250,56 @@ const bulkMoveItemsToWarehouse = async (
   }
 
   const allItemIds = items.map((i) => i.id);
+
+  // If items were not populated with their current warehouse (e.g. because the ORM
+  // would have generated WHERE item_id IN (50k IDs) crashing SQLite), load the
+  // warehouse ids via chunked knex queries (max 500 per query).
+  const itemsWithoutWarehouse = items.filter((i) => i.warehouse == null);
+  if (itemsWithoutWarehouse.length > 0) {
+    const WCHUNK = 500;
+    const warehouseMap = new Map();
+    for (let c = 0; c < itemsWithoutWarehouse.length; c += WCHUNK) {
+      const chunk = itemsWithoutWarehouse.slice(c, c + WCHUNK).map((i) => i.id);
+      const rows = await knexTrx("items_warehouse_lnk")
+        .whereIn("item_id", chunk)
+        .select("item_id", "warehouse_id");
+      rows.forEach((r) => warehouseMap.set(r.item_id, r.warehouse_id));
+    }
+    itemsWithoutWarehouse.forEach((item) => {
+      const wId = warehouseMap.get(item.id);
+      if (wId) item.warehouse = { id: wId };
+    });
+  }
+
   const changing = items.filter(
     (i) => String(i.warehouse?.id) !== String(newWarehouseId),
   );
 
+  const CHUNK = 500;
+
   // ── 1. Actualizar estado del item (transfer/nationalización) ──────────────
-  // Se actualiza para TODOS los items, no solo los que cambian bodega
+  // Se actualiza para TODOS los items, no solo los que cambian bodega.
+  // En chunks para no exceder el límite de variables de SQLite (32.766).
   if (newItemState) {
-    await knexTrx("items")
-      .whereIn("id", allItemIds)
-      .update({ state: newItemState, updated_at: now });
+    for (let c = 0; c < allItemIds.length; c += CHUNK) {
+      await knexTrx("items")
+        .whereIn("id", allItemIds.slice(c, c + CHUNK))
+        .update({ state: newItemState, updated_at: now });
+    }
   }
 
   // ── 2. Actualizar bodega via tabla de enlace ──────────────────────────────
   if (changing.length > 0) {
     const changingIds = changing.map((i) => i.id);
 
-    // Eliminar los links actuales de bodega
-    await knexTrx("items_warehouse_lnk").whereIn("item_id", changingIds).delete();
+    // Eliminar los links actuales de bodega — en chunks para no exceder el límite
+    for (let c = 0; c < changingIds.length; c += CHUNK) {
+      await knexTrx("items_warehouse_lnk")
+        .whereIn("item_id", changingIds.slice(c, c + CHUNK))
+        .delete();
+    }
 
-    // Insertar los nuevos links (en chunks para evitar límites de SQL)
-    const CHUNK = 500;
+    // Insertar los nuevos links (en chunks)
     for (let i = 0; i < changing.length; i += CHUNK) {
       await knexTrx("items_warehouse_lnk").insert(
         changing.slice(i, i + CHUNK).map((item) => ({
@@ -228,9 +309,13 @@ const bulkMoveItemsToWarehouse = async (
       );
     }
 
-    // Si no se actualizó updated_at arriba (purchase), actualizarlo aquí solo para los que cambian
+    // Si no se actualizó updated_at arriba (purchase), actualizarlo solo para los que cambian
     if (!newItemState) {
-      await knexTrx("items").whereIn("id", changingIds).update({ updated_at: now });
+      for (let c = 0; c < changingIds.length; c += CHUNK) {
+        await knexTrx("items")
+          .whereIn("id", changingIds.slice(c, c + CHUNK))
+          .update({ updated_at: now });
+      }
     }
   }
 
@@ -243,17 +328,28 @@ const bulkMoveItemsToWarehouse = async (
       byCost.get(cost).push(itemId);
     }
     for (const [cost, ids] of byCost) {
-      await knexTrx("items").whereIn("id", ids).update({ cost, updated_at: now });
+      for (let c = 0; c < ids.length; c += CHUNK) {
+        await knexTrx("items")
+          .whereIn("id", ids.slice(c, c + CHUNK))
+          .update({ cost, updated_at: now });
+      }
     }
   }
 
   // ── 3. Crear movimientos TRANSFER via strapi.db.query + tablas de enlace ──
   if (changing.length > 0) {
-    const opByItemId = new Map(
-      currentOrder.orderProducts.flatMap((op) =>
-        (op.items || []).map((item) => [item.id, op.id]),
-      ),
-    );
+    // Build itemId → orderProductId map via Knex (op.items is no longer ORM-populated).
+    const opByItemId = new Map();
+    const OPCHUNK = 500;
+    for (let c = 0; c < changing.length; c += OPCHUNK) {
+      const chunkIds = changing.slice(c, c + OPCHUNK).map((i) => i.id);
+      // @ts-ignore
+      const opRows = await knexTrx("items_order_products_lnk")
+        .whereIn("item_id", chunkIds)
+        .select("item_id", "order_product_id");
+      // @ts-ignore
+      opRows.forEach((r) => opByItemId.set(r.item_id, r.order_product_id));
+    }
 
     // createMany usa el contexto de transacción automáticamente y devuelve los IDs
     const { ids: movementIds } = await strapi.db
@@ -380,17 +476,23 @@ const bulkUpdateSaleItems = async (
   }
 
   const changingIds = changing.map((i) => i.id);
+  const CHUNK = 500;
 
-  // ── 1. Bulk update de estado ──────────────────────────────────────────────
-  await knexTrx("items")
-    .whereIn("id", changingIds)
-    .update({ state: newItemState, updated_at: now });
+  // ── 1. Bulk update de estado — en chunks para no exceder el límite de variables
+  // de SQLite (32.766 por query; 1 columna × CHUNK filas = CHUNK vars).
+  for (let c = 0; c < changingIds.length; c += CHUNK) {
+    await knexTrx("items")
+      .whereIn("id", changingIds.slice(c, c + CHUNK))
+      .update({ state: newItemState, updated_at: now });
+  }
 
   // ── 2. Para SOLD: limpiar bodega (items vendidos no tienen ubicación física) ─
   if (newItemState === ITEM_STATES.SOLD) {
-    await knexTrx("items_warehouse_lnk")
-      .whereIn("item_id", changingIds)
-      .delete();
+    for (let c = 0; c < changingIds.length; c += CHUNK) {
+      await knexTrx("items_warehouse_lnk")
+        .whereIn("item_id", changingIds.slice(c, c + CHUNK))
+        .delete();
+    }
   }
 
   // ── 3. Tipo de movimiento de inventario según la transición ───────────────
@@ -403,28 +505,78 @@ const bulkUpdateSaleItems = async (
     movementType = INVENTORY_MOVEMENT_TYPES.RESERVE;
   }
 
-  const opByItemId = new Map(
-    currentOrder.orderProducts.flatMap((op) =>
-      (op.items || []).map((item) => [item.id, op.id]),
-    ),
-  );
+  // Build itemId → orderProductId via Knex (op.items no longer ORM-populated).
+  const opByItemId = new Map();
+  {
+    const OPCHUNK = 500;
+    // @ts-ignore
+    const knexOpTrx = trx?.trx ?? trx ?? strapi.db.connection;
+    for (let c = 0; c < items.length; c += OPCHUNK) {
+      // @ts-ignore
+      const chunkIds = items.slice(c, c + OPCHUNK).map((i) => i.id);
+      // @ts-ignore
+      const opRows = await knexOpTrx("items_order_products_lnk")
+        .whereIn("item_id", chunkIds)
+        .select("item_id", "order_product_id");
+      // @ts-ignore
+      opRows.forEach((r) => opByItemId.set(r.item_id, r.order_product_id));
+    }
+  }
 
   // ── 4. Crear movimientos en bulk ─────────────────────────────────────────
-  const { ids: movementIds } = await strapi.db
-    .query("api::inventory-movement.inventory-movement")
-    .createMany({
-      data: changing.map((item) => ({
-        type: movementType,
-        quantity: item.currentQuantity || 0,
-        balanceBefore: item.currentQuantity || 0,
-        balanceAfter:
-          newItemState === ITEM_STATES.SOLD ? 0 : item.currentQuantity || 0,
-        reason: `Cambio de estado a ${newItemState} por orden ${currentOrder.type}`,
-      })),
-    });
+  //
+  // POR QUÉ usamos Knex puro en lugar de strapi.db.query().createMany():
+  //
+  // strapi.db.query(uid).createMany() llama internamente a
+  //   entityManager.getRepository(uid).createMany()
+  // que usa `this.createQueryBuilder(uid).insert(data).execute()`.
+  // Este query builder NO acepta la opción `transacting` y obtiene una conexión
+  // distinta del pool de conexiones de Knex (fuera de la transacción activa).
+  //
+  // SQLite solo permite un escritor a la vez. Si la transacción ya tiene el write
+  // lock, una segunda conexión intentando escribir falla con:
+  //   SQLITE_BUSY: database is locked
+  //
+  // La solución es hacer los inserts directamente sobre knexTrx (la misma conexión
+  // de la transacción activa) usando snake_case para los nombres de columna.
+  //
+  // Columnas requeridas para inventory_movements (además de las escalares):
+  //   - document_id : ID único de "documento" en Strapi 5 (cuid2 de 24 chars)
+  //   - created_at / updated_at : timestamps que el ORM añadiría automáticamente
+  //
+  // balance_before / balance_after son los nombres de columna en la BD (snake_case)
+  // aunque en el ORM se llaman balanceBefore / balanceAfter (camelCase).
+  //
+  // INSERT ... RETURNING "id" funciona en:
+  //   - PostgreSQL (siempre)
+  //   - SQLite ≥ 3.35 con Knex 3.x y better-sqlite3 (confirmado: 3.46.1 / 11.3.0)
+  // Devuelve [{ id: 1 }, { id: 2 }, ...] en ambos motores.
+  // ── 4. Crear movimientos en bulk — en chunks para no exceder el límite
+  // de variables de SQLite (32.766 por query; 8 columnas × CHUNK filas = 4.000 vars).
+  const { createId } = require("@paralleldrive/cuid2");
+  const movNow = new Date();
+  const movementIds = [];
+  for (let c = 0; c < changing.length; c += CHUNK) {
+    const chunkChanging = changing.slice(c, c + CHUNK);
+    const movRows = await knexTrx("inventory_movements")
+      .insert(
+        chunkChanging.map((item) => ({
+          document_id: createId(),
+          type: movementType,
+          quantity: item.currentQuantity || 0,
+          balance_before: item.currentQuantity || 0,
+          balance_after:
+            newItemState === ITEM_STATES.SOLD ? 0 : item.currentQuantity || 0,
+          reason: `Cambio de estado a ${newItemState} por orden ${currentOrder.type}`,
+          created_at: movNow,
+          updated_at: movNow,
+        })),
+      )
+      .returning("id");
+    movRows.forEach((r) => movementIds.push(r.id));
+  }
 
   // ── 5. Link tables en chunks ──────────────────────────────────────────────
-  const CHUNK = 500;
   for (let i = 0; i < movementIds.length; i += CHUNK) {
     const chunkMovIds = movementIds.slice(i, i + CHUNK);
     const chunkItems = changing.slice(i, i + CHUNK);
@@ -482,6 +634,521 @@ const bulkUpdateSaleItems = async (
 };
 
 /**
+ * Reserva N items en masa para una orden de venta/salida.
+ * Reemplaza N llamadas individuales a SaleStrategy.create (doItemMovement RESERVE).
+ * Solo aplica cuando los items ya existen en BD y están en estado AVAILABLE.
+ */
+const bulkReserveSaleItems = async (
+  strapi,
+  { items, currentOrder, orderProduct, trx },
+) => {
+  if (!items.length) return;
+
+  const ITEM_STATES = require("../../../utils/itemStates");
+  const itemIds = items.map((i) => i.id);
+  const knexTrx = trx?.trx ?? trx ?? strapi.db.connection;
+  const now = new Date();
+  const CHUNK = 500;
+
+  // 1. Cambiar estado de items a RESERVED — en chunks para no exceder el límite
+  // de variables de SQLite (32.766 por query; 1 columna × CHUNK filas = CHUNK vars).
+  for (let c = 0; c < itemIds.length; c += CHUNK) {
+    await knexTrx("items")
+      .whereIn("id", itemIds.slice(c, c + CHUNK))
+      .update({ state: ITEM_STATES.RESERVED, updated_at: now });
+  }
+
+  // 2. Vincular items a la orden (items_orders_lnk)
+  for (let c = 0; c < itemIds.length; c += CHUNK) {
+    await knexTrx("items_orders_lnk").insert(
+      itemIds.slice(c, c + CHUNK).map((id) => ({
+        item_id: id,
+        order_id: currentOrder.id,
+      })),
+    );
+  }
+
+  // 3. Vincular items al orderProduct (items_order_products_lnk)
+  for (let c = 0; c < itemIds.length; c += CHUNK) {
+    await knexTrx("items_order_products_lnk").insert(
+      itemIds.slice(c, c + CHUNK).map((id) => ({
+        item_id: id,
+        order_product_id: orderProduct.id,
+      })),
+    );
+  }
+
+  // 4. Crear movimientos RESERVE en bulk — en chunks para no exceder el límite
+  // de variables de SQLite (32.766 por query; 8 columnas × CHUNK filas = 4.000 vars).
+  // El INSERT original sin chunks fallaba con "too many SQL variables" para órdenes
+  // con miles de items fixedQuantityPerItem.
+  const { createId } = require("@paralleldrive/cuid2");
+  const movNow = new Date();
+  const movementIds = [];
+  for (let c = 0; c < items.length; c += CHUNK) {
+    const chunkItems = items.slice(c, c + CHUNK);
+    const movRows = await knexTrx("inventory_movements")
+      .insert(
+        chunkItems.map((item) => ({
+          document_id: createId(),
+          type: INVENTORY_MOVEMENT_TYPES.RESERVE,
+          quantity: item.currentQuantity || 1,
+          balance_before: item.currentQuantity || 1,
+          balance_after: item.currentQuantity || 1,
+          reason: `Reserva masiva para orden ${currentOrder.id}`,
+          created_at: movNow,
+          updated_at: movNow,
+        })),
+      )
+      .returning("id");
+    movRows.forEach((r) => movementIds.push(r.id));
+  }
+
+  // 5. Vincular movimientos a items, orden y orderProduct
+  for (let c = 0; c < movementIds.length; c += CHUNK) {
+    const slice = movementIds.slice(c, c + CHUNK);
+    const itemSlice = itemIds.slice(c, c + CHUNK);
+
+    await knexTrx("inventory_movements_item_lnk").insert(
+      slice.map((movId, j) => ({
+        inventory_movement_id: movId,
+        item_id: itemSlice[j],
+      })),
+    );
+    await knexTrx("inventory_movements_order_lnk").insert(
+      slice.map((movId) => ({
+        inventory_movement_id: movId,
+        order_id: currentOrder.id,
+      })),
+    );
+    await knexTrx("inventory_movements_order_product_lnk").insert(
+      slice.map((movId) => ({
+        inventory_movement_id: movId,
+        order_product_id: orderProduct.id,
+      })),
+    );
+  }
+
+  logger.debug("bulkReserveSaleItems completed", {
+    orderId: currentOrder.id,
+    reserved: itemIds.length,
+  });
+};
+
+/**
+ * Revierte en masa la reserva de todos los items de un orderProduct (RESERVED → AVAILABLE).
+ * Operación inversa a bulkReserveSaleItems, usada para el flujo "reemplazar reserva" en
+ * productos fixedQuantityPerItem de ventas/salidas.
+ *
+ * Usa SQL puro con subqueries para soportar 100k+ items sin cargar IDs en memoria JS.
+ * No crea movimientos de inventario: la operación es parte de un reemplazo atómico;
+ * el bulkReserveSaleItems posterior creará los movimientos de la nueva reserva.
+ */
+const bulkUnreserveFixedQtyItems = async (
+  strapi,
+  { orderProduct, currentOrder, trx },
+) => {
+  const ITEM_STATES = require("../../../utils/itemStates");
+  const knexTrx = trx?.trx ?? trx ?? strapi.db.connection;
+  const now = new Date();
+  const opId = orderProduct.id;
+  const orderId = currentOrder.id;
+
+  // 1. Revertir estado RESERVED → AVAILABLE (subquery — sin cargar IDs en JS)
+  // @ts-ignore
+  await knexTrx("items")
+    .whereIn(
+      "id",
+      knexTrx("items_order_products_lnk").where("order_product_id", opId).select("item_id"),
+    )
+    .update({ state: ITEM_STATES.AVAILABLE, updated_at: now });
+
+  // 2. Desvincular items de la orden (items_orders_lnk)
+  // @ts-ignore
+  await knexTrx("items_orders_lnk")
+    .whereIn(
+      "item_id",
+      knexTrx("items_order_products_lnk").where("order_product_id", opId).select("item_id"),
+    )
+    .where("order_id", orderId)
+    .delete();
+
+  // 3. Desvincular items del orderProduct (items_order_products_lnk)
+  // @ts-ignore
+  await knexTrx("items_order_products_lnk")
+    .where("order_product_id", opId)
+    .delete();
+};
+
+/**
+ * Revierte en masa la reserva de un subconjunto específico de items (RESERVED → AVAILABLE).
+ * A diferencia de bulkUnreserveFixedQtyItems (que revierte TODO el orderProduct via subquery),
+ * esta función acepta una lista de items concretos — útil para reducciones parciales de
+ * cantidad en órdenes fixedQuantityPerItem de venta/salida.
+ *
+ * Operaciones:
+ *   1. RESERVED → AVAILABLE en los items indicados
+ *   2. Desvincula items de la orden (items_orders_lnk)
+ *   3. Desvincula items del orderProduct (items_order_products_lnk)
+ *   4. Crea movimientos UNRESERVE para trazabilidad
+ *
+ * @param {object}   strapi
+ * @param {object[]} items        - Items a liberar (deben tener { id })
+ * @param {object}   currentOrder - Orden actual
+ * @param {object}   orderProduct - OrderProduct al que pertenecen los items
+ * @param {object}   trx          - Transacción Knex
+ */
+const bulkUnreserveSpecificSaleItems = async (
+  strapi,
+  { items, currentOrder, orderProduct, trx },
+) => {
+  if (!items.length) return;
+
+  const ITEM_STATES = require("../../../utils/itemStates");
+  const { createId } = require("@paralleldrive/cuid2");
+  const knexTrx = trx?.trx ?? trx ?? strapi.db.connection;
+  const now = new Date();
+  const itemIds = items.map((i) => i.id);
+  const CHUNK = 500;
+
+  // 1. RESERVED → AVAILABLE
+  for (let c = 0; c < itemIds.length; c += CHUNK) {
+    // @ts-ignore
+    await knexTrx("items")
+      .whereIn("id", itemIds.slice(c, c + CHUNK))
+      .update({ state: ITEM_STATES.AVAILABLE, updated_at: now });
+  }
+
+  // 2. Desvincular de la orden
+  for (let c = 0; c < itemIds.length; c += CHUNK) {
+    // @ts-ignore
+    await knexTrx("items_orders_lnk")
+      .whereIn("item_id", itemIds.slice(c, c + CHUNK))
+      .where("order_id", currentOrder.id)
+      .delete();
+  }
+
+  // 3. Desvincular del orderProduct
+  for (let c = 0; c < itemIds.length; c += CHUNK) {
+    // @ts-ignore
+    await knexTrx("items_order_products_lnk")
+      .whereIn("item_id", itemIds.slice(c, c + CHUNK))
+      .where("order_product_id", orderProduct.id)
+      .delete();
+  }
+
+  // 4. Crear movimientos UNRESERVE en bulk
+  const movNow = new Date();
+  const movementIds = [];
+  for (let c = 0; c < items.length; c += CHUNK) {
+    const chunkItems = items.slice(c, c + CHUNK);
+    // @ts-ignore
+    const movRows = await knexTrx("inventory_movements")
+      .insert(
+        chunkItems.map((item) => ({
+          document_id: createId(),
+          type: INVENTORY_MOVEMENT_TYPES.UNRESERVE,
+          quantity: item.currentQuantity || 1,
+          balance_before: item.currentQuantity || 1,
+          balance_after: item.currentQuantity || 1,
+          reason: `Devolución de reserva por reducción de cantidad en orden ${currentOrder.id}`,
+          created_at: movNow,
+          updated_at: movNow,
+        })),
+      )
+      .returning("id");
+    movRows.forEach((r) => movementIds.push(r.id));
+  }
+
+  // 5. Link tables de movimientos
+  for (let c = 0; c < movementIds.length; c += CHUNK) {
+    const slice = movementIds.slice(c, c + CHUNK);
+    const itemSlice = itemIds.slice(c, c + CHUNK);
+
+    // @ts-ignore
+    await knexTrx("inventory_movements_item_lnk").insert(
+      slice.map((movId, j) => ({
+        inventory_movement_id: movId,
+        item_id: itemSlice[j],
+      })),
+    );
+    // @ts-ignore
+    await knexTrx("inventory_movements_order_lnk").insert(
+      slice.map((movId) => ({
+        inventory_movement_id: movId,
+        order_id: currentOrder.id,
+      })),
+    );
+    // @ts-ignore
+    await knexTrx("inventory_movements_order_product_lnk").insert(
+      slice.map((movId) => ({
+        inventory_movement_id: movId,
+        order_product_id: orderProduct.id,
+      })),
+    );
+  }
+
+  logger.debug("bulkUnreserveSpecificSaleItems completed", {
+    orderId: currentOrder.id,
+    unreserved: itemIds.length,
+  });
+};
+
+/**
+ * Elimina los items excedentes de un producto fixedQuantityPerItem en una orden de compra/ingreso.
+ * Usa DELETE directos en SQL para evitar N llamadas a doItemMovement(DELETE).
+ *
+ * No carga los items en memoria — usa Knex para obtener los IDs excedentes directamente.
+ * Esto es esencial para órdenes con 100k+ items donde WHERE id IN (...) crashearía SQLite.
+ */
+const bulkDeletePurchaseItems = async (
+  strapi,
+  { orderProductId, targetCount, trx },
+) => {
+  const knexTrx = trx?.trx ?? trx ?? strapi.db.connection;
+
+  // Count current items for this orderProduct without loading them
+  const countRow = await knexTrx("items_order_products_lnk")
+    .where("order_product_id", orderProductId)
+    .count("item_id as cnt")
+    .first();
+  const total = parseInt(countRow?.cnt || 0, 10);
+  const excess = total - targetCount;
+  if (excess <= 0) return;
+
+  // Get IDs of the excess items (last `excess` by item_id descending)
+  const rows = await knexTrx("items_order_products_lnk")
+    .where("order_product_id", orderProductId)
+    .orderBy("item_id", "desc")
+    .limit(excess)
+    .select("item_id");
+  const deleteIds = rows.map((r) => r.item_id);
+
+  const CHUNK = 500;
+  for (let c = 0; c < deleteIds.length; c += CHUNK) {
+    const chunk = deleteIds.slice(c, c + CHUNK);
+    await knexTrx("items_orders_lnk").whereIn("item_id", chunk).delete();
+    await knexTrx("items_order_products_lnk").whereIn("item_id", chunk).delete();
+    await knexTrx("items_warehouse_lnk").whereIn("item_id", chunk).delete();
+    await knexTrx("items_product_lnk").whereIn("item_id", chunk).delete();
+    await knexTrx("items_source_order_lnk").whereIn("item_id", chunk).delete();
+    await knexTrx("items").whereIn("id", chunk).delete();
+  }
+
+  logger.debug("bulkDeletePurchaseItems completed", {
+    deleted: deleteIds.length,
+  });
+};
+
+/**
+ * Crea N items en masa para un producto fixedQuantityPerItem en una orden de compra/ingreso.
+ * Usa inserciones SQL directas para máximo rendimiento con grandes volúmenes (p.ej. 50k items).
+ */
+// @ts-ignore — plain JS file; TS strict mode flags untyped destructuring params
+const bulkCreatePurchaseItems = async (
+  strapi,
+  { fetchedProduct, existingCount, maxItemNumber, targetCount, currentOrder, orderProductId, trx },
+) => {
+  const countToAdd = targetCount - existingCount;
+  if (countToAdd <= 0) return;
+
+  const {
+    generateItemBarcode,
+    generateAlternativeItemBarcode,
+  } = require("../../../utils/generateCodes");
+  const ITEM_STATES = require("../../../utils/itemStates");
+
+  const knexTrx = trx?.trx ?? trx ?? strapi.db.connection;
+  const CHUNK = 500;
+
+  for (let offset = 0; offset < countToAdd; offset += CHUNK) {
+    const size = Math.min(CHUNK, countToAdd - offset);
+
+    // ── Construir datos de items en snake_case ───────────────────────────────
+    //
+    // Los nombres de columna en la BD son snake_case aunque el ORM los expone
+    // en camelCase. Al insertar con Knex directo debemos usar snake_case.
+    //
+    // Campos obligatorios adicionales al bypasear el ORM:
+    //   - document_id : identificador único de "documento" en Strapi 5 (cuid2).
+    //     Strapi lo genera automáticamente en el ORM; aquí lo generamos con
+    //     @paralleldrive/cuid2, que es la misma librería que usa internamente.
+    //   - created_at / updated_at : timestamps que el ORM añade automáticamente.
+    const { createId } = require("@paralleldrive/cuid2");
+    const now = new Date();
+
+    const itemRows = Array.from({ length: size }, (_, i) => {
+      const itemNum = maxItemNumber + offset + i + 1;
+      return {
+        // ── Columnas de "documento" Strapi 5 ──────────────────────────────
+        document_id: createId(),          // cuid2 único (24 chars)
+        created_at: now,
+        updated_at: now,
+        // ── Escalares del contenido (ORM camelCase → BD snake_case) ───────
+        name: fetchedProduct.name,
+        barcode: generateItemBarcode(
+          fetchedProduct,
+          1,
+          "1",
+          itemNum,
+          currentOrder.containerCode,
+        ),
+        alternative_barcode: generateAlternativeItemBarcode(
+          fetchedProduct.code,
+          1,
+          currentOrder.containerCode,
+        ),
+        original_quantity: 1,
+        current_quantity: 1,
+        unit: fetchedProduct.unit,
+        state: ITEM_STATES.AVAILABLE,
+        lot_number: "1",
+        item_number: String(itemNum),
+        cost: 0,
+        is_partition: false,
+        quality_status: "approved",
+        cbm: 0,
+        weight: 1,
+        is_invoiced: false,
+        source_quantity_consumed: 0,
+      };
+    });
+
+    // ── Insertar items con INSERT ... RETURNING id ───────────────────────────
+    //
+    // POR QUÉ Knex puro en lugar de strapi.db.query("api::item.item").createMany():
+    //
+    //   strapi.db.query(uid) devuelve entityManager.getRepository(uid).
+    //   Su método createMany() usa internamente `this.createQueryBuilder(uid)`
+    //   que abre una conexión NUEVA desde el pool de Knex — fuera de la transacción
+    //   activa. En SQLite (single-writer), eso causa:
+    //     SQLITE_BUSY: database is locked
+    //   porque la transacción principal ya tiene el write lock.
+    //
+    //   La solución es usar knexTrx directamente: todas las escrituras van por la
+    //   misma conexión de la transacción → un solo escritor, sin conflicto.
+    //
+    // INSERT ... RETURNING "id":
+    //   - PostgreSQL: soportado nativamente siempre.
+    //   - SQLite: soportado desde SQLite 3.35 (este proyecto usa 3.46.1).
+    //     Knex 3.x + better-sqlite3 retorna [{ id: 1 }, { id: 2 }, ...].
+    const itemDbRows = await knexTrx("items").insert(itemRows).returning("id");
+    const itemIds = itemDbRows.map((r) => r.id);
+
+    // ── Tablas de enlace: item → order, orderProduct, warehouse, product, sourceOrder
+    //
+    // En Strapi 5 TODAS las relaciones (incluso manyToOne) se almacenan en tablas
+    // de enlace separadas (_lnk). No hay columnas FK directas en la tabla principal.
+    // Insertamos en chunks de CHUNK filas para mantenernos bajo el límite de
+    // variables de SQLite (999) cuando hay muchos items.
+
+    // Link items to order (many-to-many: items ↔ orders)
+    for (let c = 0; c < itemIds.length; c += CHUNK) {
+      await knexTrx("items_orders_lnk").insert(
+        itemIds.slice(c, c + CHUNK).map((id) => ({
+          item_id: id,
+          order_id: currentOrder.id,
+        })),
+      );
+    }
+    // Link items to orderProduct (many-to-many: items ↔ order_products)
+    for (let c = 0; c < itemIds.length; c += CHUNK) {
+      await knexTrx("items_order_products_lnk").insert(
+        itemIds.slice(c, c + CHUNK).map((id) => ({
+          item_id: id,
+          order_product_id: orderProductId,
+        })),
+      );
+    }
+    // Link items to warehouse (manyToOne via link table)
+    for (let c = 0; c < itemIds.length; c += CHUNK) {
+      await knexTrx("items_warehouse_lnk").insert(
+        itemIds.slice(c, c + CHUNK).map((id) => ({
+          item_id: id,
+          warehouse_id: currentOrder.destinationWarehouse.id,
+        })),
+      );
+    }
+    // Link items to product (manyToOne via link table)
+    for (let c = 0; c < itemIds.length; c += CHUNK) {
+      await knexTrx("items_product_lnk").insert(
+        itemIds.slice(c, c + CHUNK).map((id) => ({
+          item_id: id,
+          product_id: fetchedProduct.id,
+        })),
+      );
+    }
+    // Link items to sourceOrder (manyToOne via link table — "de qué orden proviene el item")
+    for (let c = 0; c < itemIds.length; c += CHUNK) {
+      await knexTrx("items_source_order_lnk").insert(
+        itemIds.slice(c, c + CHUNK).map((id) => ({
+          item_id: id,
+          order_id: currentOrder.id,
+        })),
+      );
+    }
+
+    // ── Crear movimientos de inventario IN para los nuevos items ────────────
+    //
+    // Cada item creado genera un movimiento de tipo IN (ingreso) que queda
+    // registrado en inventory_movements. Nuevamente usamos Knex puro por la
+    // misma razón: evitar la segunda conexión que causaría SQLITE_BUSY.
+    //
+    // Reuse `now` del bloque de items para que created_at sea consistente.
+    const movRows = await knexTrx("inventory_movements")
+      .insert(
+        itemIds.map(() => ({
+          document_id: createId(),
+          type: INVENTORY_MOVEMENT_TYPES.IN,
+          quantity: 1,
+          balance_before: 0,   // antes del ingreso: 0 unidades
+          balance_after: 1,    // después: 1 unidad disponible
+          reason: `Creación masiva: ${fetchedProduct.name}`,
+          created_at: now,
+          updated_at: now,
+        })),
+      )
+      .returning("id");
+    const movementIds = movRows.map((r) => r.id);
+
+    for (let c = 0; c < movementIds.length; c += CHUNK) {
+      const slice = movementIds.slice(c, c + CHUNK);
+      const itemSlice = itemIds.slice(c, c + CHUNK);
+      await knexTrx("inventory_movements_item_lnk").insert(
+        slice.map((movId, j) => ({
+          inventory_movement_id: movId,
+          item_id: itemSlice[j],
+        })),
+      );
+      await knexTrx("inventory_movements_order_lnk").insert(
+        slice.map((movId) => ({
+          inventory_movement_id: movId,
+          order_id: currentOrder.id,
+        })),
+      );
+      await knexTrx("inventory_movements_order_product_lnk").insert(
+        slice.map((movId) => ({
+          inventory_movement_id: movId,
+          order_product_id: orderProductId,
+        })),
+      );
+      await knexTrx("inventory_movements_destination_warehouse_lnk").insert(
+        slice.map((movId) => ({
+          inventory_movement_id: movId,
+          warehouse_id: currentOrder.destinationWarehouse.id,
+        })),
+      );
+    }
+  }
+
+  logger.debug("bulkCreatePurchaseItems completed", {
+    orderId: currentOrder.id,
+    product: fetchedProduct.name,
+    created: countToAdd,
+  });
+};
+
+/**
  * Actualiza los productos de una orden
  */
 const updateOrderProducts = async (
@@ -493,23 +1160,40 @@ const updateOrderProducts = async (
   trx,
   newDestinationWarehouseId = null,
 ) => {
-  // Obtener todos los Items actuales y requeridos
-  const currentItems = currentOrder.orderProducts
-    .map((orderProduct) => orderProduct.items)
-    .flat();
+  // currentItems and itemIdToOrderProduct are built incrementally per-product
+  // using Knex queries. This avoids the ORM populate that generates
+  // WHERE id IN (100k IDs) — which crashes SQLite for large fixedQty orders.
+  const currentItems = [];
+  // @ts-ignore
+  const itemIdToOrderProduct = new Map();
 
   const { ITEM_SERVICE } = require("../../../utils/services");
   const ITEM_STATES = require("../../../utils/itemStates");
 
+  // Knex connection for direct SQL without ORM overhead
+  // @ts-ignore
+  const knexMain = trx?.trx ?? trx ?? strapi.db.connection;
+
   const itemsFromRequest = [];
+  const pendingBulkCreations = [];
+  // fixedQty SALE/OUT: collected here, processed in bulk after orderProducts are created
+  const pendingFixedQtySaleOps = [];
+
   for (const productReq of products) {
+    // Distinguish between:
+    //   items: []        → frontend explicitly wants zero items (delete all)
+    //   items: null      → frontend didn't load items yet; preserve existing DB items
+    //   items: undefined → same as null (key absent) — also preserve
+    // The default `= []` in destructuring would silently treat null as [] (data loss).
     const {
       product: productId,
-      items = [],
+      items: rawItems,
       count,
       ivaIncluded,
       price,
     } = productReq;
+
+    const itemsNotLoaded = rawItems == null;
 
     const fetchedProduct = await strapi.entityService.findOne(
       PRODUCT_SERVICE,
@@ -519,25 +1203,142 @@ const updateOrderProducts = async (
     if (!fetchedProduct)
       throw new Error(`El producto con ID ${productId} no existe`);
 
-    let finalItems = items;
+    // @ts-ignore — plain JS file; TS strict mode flags untyped arrow params here
+    const currentOrderProductForProduct = currentOrder.orderProducts.find(
+      (op) => op.product.id === productId,
+    );
+    const opId = currentOrderProductForProduct?.id;
 
+    // ── Service products: no physical items ──────────────────────────────────
     if (fetchedProduct.type === "service") {
-      // Services don't handle physical items
-      finalItems = [];
-    } else if (
-      fetchedProduct.type === "fixedQuantityPerItem" &&
-      count !== undefined
-    ) {
-      const currentItemsForProduct =
-        currentOrder.orderProducts.find((op) => op.product.id === productId)
-          ?.items || [];
-      const currentCount = currentItemsForProduct.length;
+      // Services don't have items — still push empty so syncOrderProducts can
+      // update metadata (price, confirmedQuantity) for this product.
+      continue;
+    }
+
+    // ── fixedQuantityPerItem purchase/in with count ───────────────────────────
+    // These orders can have 100k+ items. Never load them into memory.
+    // Bulk SQL operations handle all create/delete without going through classifyItems.
+    if (fetchedProduct.type === "fixedQuantityPerItem" && count !== undefined) {
+      const isPurchaseOrIn =
+        currentOrder.type === ORDER_TYPES.PURCHASE ||
+        currentOrder.type === ORDER_TYPES.IN;
+
+      if (isPurchaseOrIn) {
+        // Get current item count via Knex — no array in memory
+        // @ts-ignore
+        const countRow = await knexMain("items_order_products_lnk")
+          .where("order_product_id", opId || 0)
+          .count("item_id as cnt")
+          .first();
+        const currentCount = parseInt(countRow?.cnt || 0, 10);
+
+        if (count < currentCount) {
+          await bulkDeletePurchaseItems(strapi, {
+            orderProductId: opId,
+            targetCount: count,
+            trx,
+          });
+        } else if (count > currentCount) {
+          // Get MAX(item_number) for sequential numbering in bulk create
+          // @ts-ignore
+          const maxRow = opId
+            ? await knexMain("items as i")
+                .join("items_order_products_lnk as lnk", "i.id", "lnk.item_id")
+                .where("lnk.order_product_id", opId)
+                .max("i.item_number as maxNum")
+                .first()
+            : null;
+          const maxItemNumber = parseInt(maxRow?.maxNum || 0, 10) || 0;
+
+          pendingBulkCreations.push({
+            fetchedProduct,
+            existingCount: currentCount,
+            maxItemNumber,
+            targetCount: count,
+            productId,
+          });
+        }
+
+        // ── Sincronizar bodega de items existentes ──────────────────────────────
+        // BUG FIX: bulkCreatePurchaseItems asigna destinationWarehouse a los items
+        // NUEVOS, pero los items YA EXISTENTES nunca tenían su bodega actualizada
+        // cuando el usuario cambiaba destinationWarehouse en una orden existente.
+        //
+        // IMPORTANTE: currentOrder se carga ANTES de aplicar el update, así que
+        // currentOrder.destinationWarehouse es la bodega VIEJA. La bodega NUEVA
+        // llega como newDestinationWarehouseId (prioridad) y hay que usarla aquí,
+        // igual que hace el fast path de itemsToKeep (líneas ~1411-1416).
+        //
+        // Usamos SQL puro (sin cargar IDs en JS) para evitar el límite de variables
+        // de SQLite con órdenes de 100k+ items:
+        //   1. Borrar links de bodega incorrectos via subquery WHERE item_id IN (SELECT ...)
+        //   2. Reinsertar links faltantes via INSERT ... SELECT (LEFT JOIN para detectar ausentes)
+        const effectiveDestId = newDestinationWarehouseId
+          ? Number(newDestinationWarehouseId)
+          : Number(currentOrder.destinationWarehouse?.id);
+        if (opId && effectiveDestId) {
+          const destId = effectiveDestId;
+
+          // 1. Eliminar links cuya bodega ≠ destinationWarehouse
+          // @ts-ignore
+          await knexMain("items_warehouse_lnk")
+            .whereIn(
+              "item_id",
+              knexMain("items_order_products_lnk")
+                .where("order_product_id", opId)
+                .select("item_id"),
+            )
+            .whereNot("warehouse_id", destId)
+            .delete();
+
+          // 2. Insertar links faltantes (items que quedaron sin bodega tras el delete)
+          // @ts-ignore
+          await knexMain.raw(
+            `INSERT INTO items_warehouse_lnk (item_id, warehouse_id)
+             SELECT lnk.item_id, ?
+             FROM items_order_products_lnk lnk
+             LEFT JOIN items_warehouse_lnk iwl ON iwl.item_id = lnk.item_id
+             WHERE lnk.order_product_id = ?
+               AND iwl.item_id IS NULL`,
+            [destId, opId],
+          );
+        }
+
+        // fixedQty purchase/in items are handled entirely via bulk ops.
+        // Skip classifyItems for this product — adding to currentItems or
+        // itemsFromRequest would require loading 100k IDs into memory.
+        continue;
+      }
+
+      // ── fixedQuantityPerItem sale/out ────────────────────────────────────────
+      // WHY deferred: para 50k+ items, N llamadas a doItemMovement(CREATE) causan
+      // timeout y SQLITE_BUSY (cada ORM call abre conexión nueva). En su lugar,
+      // recopilamos los items aquí y ejecutamos bulkReserveSaleItems /
+      // bulkUnreserveSpecificSaleItems en la Fase 3, después de que los
+      // orderProducts estén creados.
+      //
+      // Los finalItems se agregan a currentItems e itemsFromRequest en la Fase 3
+      // para que classifyItems los ponga en itemsToKeep y bulkUpdateSaleItems
+      // los procese correctamente en la completación de la orden.
+      // @ts-ignore
+      const existingItems = opId
+        ? await knexMain("items as i")
+            .join("items_order_products_lnk as lnk", "i.id", "lnk.item_id")
+            .where("lnk.order_product_id", opId)
+            .select("i.id", "i.state")
+        : [];
+      const currentCount = existingItems.length;
+
+      let saleAvailableItems = [];
+      let saleRemovedItems = [];
+      let saleFinalItems;
 
       if (count === currentCount) {
-        finalItems = currentItemsForProduct;
+        saleFinalItems = existingItems;
       } else if (count > currentCount) {
         const diff = count - currentCount;
-        const availableItems = await strapi.entityService.findMany(
+        const queriedItems = await strapi.entityService.findMany(
           ITEM_SERVICE,
           {
             filters: {
@@ -552,21 +1353,62 @@ const updateOrderProducts = async (
           },
         );
 
-        if (availableItems.length < diff) {
+        if (queriedItems.length < diff) {
           throw new Error(
-            `No hay suficientes items disponibles para ${fetchedProduct.name}. Faltan ${diff}, pero solo hay ${availableItems.length}.`,
+            `No hay suficientes items disponibles para ${fetchedProduct.name}. Faltan ${diff}, pero solo hay ${queriedItems.length}.`,
           );
         }
 
-        finalItems = [...currentItemsForProduct, ...availableItems];
+        saleAvailableItems = queriedItems;
+        saleFinalItems = [...existingItems, ...saleAvailableItems];
       } else {
-        finalItems = currentItemsForProduct.slice(0, count);
+        saleFinalItems = existingItems.slice(0, count);
+        saleRemovedItems = existingItems.slice(count);
       }
+
+      pendingFixedQtySaleOps.push({
+        productId,
+        finalItems: saleFinalItems,
+        availableItems: saleAvailableItems,
+        removedItems: saleRemovedItems,
+        ivaIncluded,
+        price,
+      });
+      continue;
     }
+
+    // ── Variable / cutItem products ───────────────────────────────────────────
+    // Load current items from DB via Knex for this orderProduct.
+    // Variable products have manageable item counts (tens to hundreds).
+    // @ts-ignore
+    const currentProductItems = opId
+      ? await knexMain("items as i")
+          .join("items_order_products_lnk as lnk", "i.id", "lnk.item_id")
+          .where("lnk.order_product_id", opId)
+          .select(
+            "i.id",
+            "i.state",
+            "i.current_quantity as currentQuantity",
+            "i.lot_number as lotNumber",
+            "i.item_number as itemNumber",
+            "i.barcode",
+            "i.alternative_barcode as alternativeBarcode",
+          )
+      : [];
+
+    for (const item of currentProductItems) {
+      currentItems.push(item);
+      itemIdToOrderProduct.set(item.id, currentOrderProductForProduct);
+    }
+
+    // Sentinel: items were not sent (null/undefined) → preserve existing DB items.
+    // An explicit empty array `[]` IS meaningful — it means "delete all items".
+    const finalItems = itemsNotLoaded
+      ? currentProductItems
+      : (rawItems || []);
 
     // Auto-generation is disabled for cutItem/variableQuantityPerItem.
     // The frontend's explicit items array determines the order items.
-
     for (const item of finalItems) {
       itemsFromRequest.push({
         ...item,
@@ -635,7 +1477,68 @@ const updateOrderProducts = async (
     }
   });
 
-  // Clasificar items
+  // ── Fase 3: Bulk reserve/unreserve para fixedQty SALE/OUT ───────────────────
+  // Ahora que los orderProducts existen en BD, ejecutamos las operaciones bulk.
+  //
+  // Tabla de transiciones:
+  //   availableItems (nuevos)  → bulkReserveSaleItems  → AVAILABLE → RESERVED
+  //   removedItems  (exceso)   → bulkUnreserveSpecificSaleItems → RESERVED → AVAILABLE
+  //   finalItems    (todos)    → currentItems + itemsFromRequest → itemsToKeep
+  //
+  // Los items recién reservados (availableItems) se marcan como RESERVED en el
+  // array local para que bulkUpdateSaleItems no cree movimientos duplicados al
+  // verificar qué estado tienen vs. el estado destino.
+  for (const {
+    productId: fixedQtyProductId,
+    finalItems,
+    availableItems,
+    removedItems,
+    ivaIncluded: fixedIva,
+    price: fixedPrice,
+  } of pendingFixedQtySaleOps) {
+    const fixedOrderProduct = orderProductsByProductId.get(fixedQtyProductId);
+
+    // Bulk reservar items nuevos (AVAILABLE → RESERVED + vincular + movimientos)
+    if (availableItems.length > 0 && fixedOrderProduct) {
+      await bulkReserveSaleItems(strapi, {
+        items: availableItems,
+        currentOrder,
+        orderProduct: fixedOrderProduct,
+        trx,
+      });
+    }
+
+    // Bulk liberar items removidos (RESERVED → AVAILABLE + desvincular + movimientos)
+    if (removedItems.length > 0 && fixedOrderProduct) {
+      await bulkUnreserveSpecificSaleItems(strapi, {
+        items: removedItems,
+        currentOrder,
+        orderProduct: fixedOrderProduct,
+        trx,
+      });
+    }
+
+    // Agregar finalItems a currentItems e itemsFromRequest con estado corregido.
+    // Los items de availableItems ya fueron reservados → su estado real es RESERVED.
+    const newlyReservedIds = new Set(availableItems.map((i) => i.id));
+    for (const item of finalItems) {
+      const correctedState = newlyReservedIds.has(item.id)
+        ? ITEM_STATES.RESERVED
+        : item.state;
+      currentItems.push({ ...item, state: correctedState });
+      itemsFromRequest.push({
+        ...item,
+        state: correctedState,
+        product: fixedQtyProductId,
+        ivaIncluded: fixedIva,
+        price: parseFloat(fixedPrice) || 0,
+      });
+    }
+  }
+
+  // Classify items. currentItems and itemIdToOrderProduct were built per-product
+  // in the loop above. fixedQty purchase/in and fixedQty SALE/OUT items are
+  // excluded from the per-product loop and handled via bulk ops above.
   const { itemsToRemove, itemsToKeep, itemsToAdd } = classifyItems(
     currentItems,
     itemsFromRequest,
@@ -651,9 +1554,10 @@ const updateOrderProducts = async (
   await runInBatches(
     itemsToRemove,
     async (item) => {
-      const orderProduct = currentOrder.orderProducts.find(
-        (op) => op.product.id == item.product.id,
-      );
+      const orderProduct = itemIdToOrderProduct.get(item.id);
+      if (!orderProduct) {
+        throw new Error(`OrderProduct no encontrado para el item ${item.id}`);
+      }
 
       await strapi.service(ORDER_SERVICE).doItemMovement({
         movementType: ITEM_MOVEMENT_TYPES.DELETE,
@@ -719,6 +1623,22 @@ const updateOrderProducts = async (
     },
     10,
   );
+
+  // ── Bulk create for fixedQuantityPerItem purchase/in orders ──────────────
+  for (const bulk of pendingBulkCreations) {
+    const orderProductEntry = orderProductsByProductId.get(bulk.productId);
+    if (orderProductEntry) {
+      await bulkCreatePurchaseItems(strapi, {
+        fetchedProduct: bulk.fetchedProduct,
+        existingCount: bulk.existingCount,
+        maxItemNumber: bulk.maxItemNumber,
+        targetCount: bulk.targetCount,
+        currentOrder,
+        orderProductId: orderProductEntry.id,
+        trx,
+      });
+    }
+  }
 
   // ── Fast path SALE/OUT: bulk state update ────────────────────────────────
   // Para órdenes de venta/salida los items no cambian de bodega; solo cambian
@@ -805,9 +1725,7 @@ const updateOrderProducts = async (
         throw new Error("Error al actualizar item existente");
       }
 
-      const orderProduct = currentOrder.orderProducts.find((op) =>
-        op.items.find((i) => i.id === item.id),
-      );
+      const orderProduct = itemIdToOrderProduct.get(item.id);
 
       if (!orderProduct) {
         throw new Error("El OrderProduct del Item no ha sido encontrado");
@@ -885,7 +1803,20 @@ const updateExistingOrderProducts = async (
 
   if (!resolvedDestinationWarehouse) return;
 
-  const allItems = orderProducts.flatMap((op) => op.items);
+  // Load item IDs via Knex — avoids ORM populate that would generate
+  // WHERE id IN (100k IDs) and crash SQLite for large fixedQty orders.
+  // bulkMoveItemsToWarehouse only needs { id } and loads warehouse data itself.
+  // @ts-ignore
+  const knexTrxEx = trx?.trx ?? trx ?? strapi.db.connection;
+  // @ts-ignore
+  const opIds = orderProducts.map((op) => op.id).filter(Boolean);
+  if (opIds.length === 0) return;
+  // @ts-ignore
+  const itemRows = await knexTrxEx("items_order_products_lnk")
+    .whereIn("order_product_id", opIds)
+    .select("item_id");
+  // @ts-ignore
+  const allItems = itemRows.map((r) => ({ id: r.item_id }));
   if (allItems.length === 0) return;
 
   await bulkMoveItemsToWarehouse(strapi, {
@@ -1050,6 +1981,9 @@ module.exports = {
   updateExistingOrderProducts,
   syncOrderProducts,
   bulkUpdateSaleItems,
+  bulkReserveSaleItems,
+  bulkUnreserveFixedQtyItems,
+  bulkUnreserveSpecificSaleItems,
   fastUnreserveSaleItem,
   ORDER_POPULATE,
   ORDER_POPULATE_BASIC,

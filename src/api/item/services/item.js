@@ -296,6 +296,26 @@ module.exports = createCoreService("api::item.item", ({ strapi }) => ({
    * @param {number} orderProductId - ID del orderProduct
    * @param {number|null} recoveredWarehouse - Warehouse recuperado desde movements (para reversión)
    * @returns {Object|null} Datos del movimiento de estado o null si no hay cambios
+   *
+   * ─── TABLA DE MOVIMIENTOS POR TRANSICIÓN DE ESTADO ────────────────────
+   *  orderType   │ reverse │ estado anterior  → nuevo     │ movimiento
+   * ─────────────┼─────────┼────────────────────────────┼──────────────
+   *  sale        │ false   │ AVAILABLE → RESERVED        │ RESERVE
+   *  sale        │ false   │ RESERVED  → SOLD            │ OUT
+   *  sale        │ true    │ RESERVED  → AVAILABLE       │ UNRESERVE
+   *  return      │ false   │ (any)     → AVAILABLE       │ IN
+   *  return      │ true    │ AVAILABLE → SOLD            │ OUT
+   *  out         │ false   │ AVAILABLE → RESERVED        │ RESERVE
+   *  out         │ false   │ RESERVED  → DROPPED         │ OUT
+   *  out         │ true    │ RESERVED  → AVAILABLE       │ UNRESERVE
+   *  out         │ true    │ DROPPED   → AVAILABLE       │ IN
+   *  transfer    │ false   │ AVAILABLE → RESERVED        │ RESERVE
+   *  transfer    │ false   │ RESERVED  → AVAILABLE       │ UNRESERVE (completado)
+   *  transfer    │ true    │ RESERVED  → AVAILABLE       │ UNRESERVE
+   *  nationalization│ *    │ (sin cambio de estado aquí) │ null
+   * ─────────────────────────────────────────────────────────────────────
+   *  NOTA: Transform y Adjustment no usan este método —
+   *  sus estrategias gestionan los movimientos directamente.
    */
   _processItemStateChanges(
     currentItem,

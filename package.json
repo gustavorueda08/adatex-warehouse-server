@@ -22,7 +22,6 @@
     "@strapi/strapi": "5.23.3",
     "archiver": "^7.0.1",
     "better-sqlite3": "11.3.0",
-    "canvas": "^3.2.0",
     "classnames": "^2.5.1",
     "exceljs": "^4.4.0",
     "jspdf": "^3.0.3",
@@ -38,7 +37,7 @@
     "zod": "^4.1.11"
   },
   "engines": {
-    "node": ">=18.0.0 <=22.x.x",
+    "node": ">=20.0.0 <=22.x.x",
     "npm": ">=6.0.0"
   },
   "strapi": {

@@ -6,7 +6,7 @@ const ORDER_TYPES = require("../utils/orderTypes");
 const ITEM_MOVEMENT_TYPES = require("../utils/itemMovementTypes");
 
 // Reusables
-const UnitEnum = z.enum(["kg", "m", "roll", "unit"]);
+const UnitEnum = z.enum(["kg", "m", "roll", "unit", "piece", "und", "par"]);
 const OrderType = z.enum(Object.values(ORDER_TYPES));
 const OrderState = z
   .union([z.null(), z.enum(Object.values(ORDER_STATES))])
@@ -232,7 +232,10 @@ const UpdateOrderSchema = z.object({
         .object({
           orderProduct: ID.optional().default(null),
           product: ID,
-          items: z.array(Item).optional().default([]),
+          // null → items not loaded by frontend (preserve existing DB items)
+          // []   → frontend explicitly wants zero items (delete all)
+          // [...] → update with this list
+          items: z.union([z.array(Item), z.null()]).optional().default(null),
           requestedQuantity: z
             .union([z.string(), z.number()])
             .transform(Number)
