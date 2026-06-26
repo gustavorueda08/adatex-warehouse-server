@@ -193,15 +193,18 @@ module.exports = createCoreService(
      *
      * Design that guarantees everything ties out:
      * - The closing balance of every year is **anchored to the real physical
-     *   stock**: closing(Y) = current_on_hand − (net movements after year Y).
-     *   The opening balance is then derived so the year balances exactly
-     *   (opening = closing − entradas + salidas). Any residual (data drift,
-     *   excluded sale portions, movements without an item, etc.) is absorbed
-     *   into the opening balance. As a corollary, closing(Y) === opening(Y+1)
-     *   for consecutive years, so the chain across the tabs is consistent.
+     *   stock**: closing(Y) = current_on_hand − (net movements after year Y),
+     *   opening(Y) = closing(Y) − entradas + salidas. As a corollary,
+     *   closing(Y) === opening(Y+1), so the chain across the tabs is consistent.
+     * - **No negative balances.** Where the data would force a balance below
+     *   zero (stock that left without a recorded outflow, plus the hidden
+     *   secondary-document sales), the missing quantity is assumed to have been
+     *   part of the opening stock: the product is lifted up by the minimum
+     *   amount so no balance, in any year, is ever negative. The lift appears in
+     *   every year's opening, so the chain still holds.
      * - Sale movements only count their `invoicePercentage`% portion (see
      *   {@link netEffect}); the remainder invoiced under the secondary document
-     *   never shows up, yet the balances still reconcile thanks to the anchor.
+     *   never shows up, yet the balances still reconcile.
      *
      * Item-level movements are aggregated into one line per (product, document,
      * type, day). Source movements are read in pages so this scales to hundreds
@@ -364,24 +367,26 @@ module.exports = createCoreService(
         );
       }
 
-      const buildRows = (yearMap, unit) => {
-        const buckets = yearMap
-          ? Array.from(yearMap.values()).sort((a, b) => a.firstTs - b.firstTs)
-          : [];
-        let totalIn = 0;
-        let totalOut = 0;
-        buckets.forEach((b) => {
-          if (b.sumDelta > 0) totalIn += b.sumDelta;
-          else totalOut += -b.sumDelta;
-        });
-        return { buckets, totalIn, totalOut, unit };
-      };
+      // ── Per-product, per-year assembly ──────────────────────────────────────
+      // For each requested year the balance is anchored to the real physical
+      // stock: closing(Y) = stock_now − net movements after year Y, and
+      // opening(Y) = closing(Y) − entradas + salidas. This keeps the chain
+      // consistent (closing(Y) === opening(Y+1)).
+      //
+      // Where this would push any balance below zero (stock that left without a
+      // recorded outflow, plus the hidden secondary-document sales), we assume
+      // the missing quantity was already part of the opening stock: the whole
+      // product is shifted up by the minimum amount needed so no balance — in
+      // any year — is ever negative. The lift shows up in every year's opening,
+      // so the years still chain perfectly.
+      const perProduct = {};
+      for (const pid of Object.keys(productMeta)) {
+        const meta = productMeta[pid];
+        const eb = effectsByYear[pid] || {};
+        const byYear = {};
+        let minBalance = Infinity;
 
-      const yearsOut = yearList.map((Y) => {
-        const productsOut = [];
-        for (const pid of Object.keys(productMeta)) {
-          const meta = productMeta[pid];
-          const eb = effectsByYear[pid] || {};
+        for (const Y of yearList) {
           let laterSum = 0;
           for (const yrStr of Object.keys(eb)) {
             if (Number(yrStr) > Y) laterSum += eb[yrStr];
@@ -391,20 +396,22 @@ module.exports = createCoreService(
           const yearMap = bucketsByProduct[pid]
             ? bucketsByProduct[pid].get(Y)
             : null;
-          const { buckets, totalIn, totalOut } = buildRows(yearMap, meta.unit);
+          const buckets = yearMap
+            ? Array.from(yearMap.values()).sort((a, b) => a.firstTs - b.firstTs)
+            : [];
+          let totalIn = 0;
+          let totalOut = 0;
+          buckets.forEach((b) => {
+            if (b.sumDelta > 0) totalIn += b.sumDelta;
+            else totalOut += -b.sumDelta;
+          });
           const openingRaw = closingRaw - totalIn + totalOut;
 
-          if (
-            buckets.length === 0 &&
-            Math.abs(openingRaw) < 0.0001 &&
-            Math.abs(closingRaw) < 0.0001
-          ) {
-            continue;
-          }
-
+          minBalance = Math.min(minBalance, openingRaw);
           let saldo = openingRaw;
           const rows = buckets.map((b) => {
             saldo += b.sumDelta;
+            minBalance = Math.min(minBalance, saldo);
             const entrada = b.sumDelta > 0 ? b.sumDelta : 0;
             const salida = b.sumDelta < 0 ? -b.sumDelta : 0;
 
@@ -433,20 +440,58 @@ module.exports = createCoreService(
               unit: meta.unit,
               entrada: round(entrada),
               salida: round(salida),
-              saldo: round(saldo),
+              saldoRaw: saldo,
               notes: notesParts.join(" · "),
             };
           });
+
+          byYear[Y] = { openingRaw, closingRaw, totalIn, totalOut, rows };
+        }
+
+        const lift = minBalance < 0 ? -minBalance : 0;
+        perProduct[pid] = { meta, byYear, lift };
+      }
+
+      const yearsOut = yearList.map((Y) => {
+        const productsOut = [];
+        for (const pid of Object.keys(perProduct)) {
+          const { meta, byYear, lift } = perProduct[pid];
+          const yd = byYear[Y];
+          const opening = round(yd.openingRaw + lift);
+          const closing = round(yd.closingRaw + lift);
+
+          if (
+            yd.rows.length === 0 &&
+            Math.abs(opening) < 0.0001 &&
+            Math.abs(closing) < 0.0001
+          ) {
+            continue;
+          }
+
+          const rows = yd.rows.map((r) => ({
+            date: r.date,
+            type: r.type,
+            document: r.document,
+            invoice: r.invoice,
+            terceroNit: r.terceroNit,
+            terceroName: r.terceroName,
+            warehouse: r.warehouse,
+            unit: r.unit,
+            entrada: r.entrada,
+            salida: r.salida,
+            saldo: round(r.saldoRaw + lift),
+            notes: r.notes,
+          }));
 
           productsOut.push({
             productId: Number(pid),
             code: meta.code,
             name: meta.name,
             unit: meta.unit,
-            opening: round(openingRaw),
-            closing: round(closingRaw),
-            totalIn: round(totalIn),
-            totalOut: round(totalOut),
+            opening,
+            closing,
+            totalIn: round(yd.totalIn),
+            totalOut: round(yd.totalOut),
             movementCount: rows.length,
             rows,
           });
