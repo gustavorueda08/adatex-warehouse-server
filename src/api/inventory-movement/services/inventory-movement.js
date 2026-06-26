@@ -191,20 +191,19 @@ module.exports = createCoreService(
      * Builds an inventory Kardex (quantity-only) for one or more fiscal years,
      * grouped by product and consolidated across all warehouses.
      *
-     * Design that guarantees everything ties out:
-     * - The closing balance of every year is **anchored to the real physical
-     *   stock**: closing(Y) = current_on_hand − (net movements after year Y),
-     *   opening(Y) = closing(Y) − entradas + salidas. As a corollary,
-     *   closing(Y) === opening(Y+1), so the chain across the tabs is consistent.
-     * - **No negative balances.** Where the data would force a balance below
-     *   zero (stock that left without a recorded outflow, plus the hidden
-     *   secondary-document sales), the missing quantity is assumed to have been
-     *   part of the opening stock: the product is lifted up by the minimum
-     *   amount so no balance, in any year, is ever negative. The lift appears in
-     *   every year's opening, so the chain still holds.
+     * Design (credible, audit-ready):
+     * - The company started with no inventory, so every product begins at
+     *   **balance zero** and is rebuilt chronologically forward from the
+     *   recorded movements. closing(Y) === opening(Y+1) (consistent chain).
+     * - **No negative balances.** When a movement would drive the balance below
+     *   zero — stock that physically existed but whose purchase/entry was not
+     *   recorded during the start-up disorder, plus the hidden secondary-document
+     *   sales — a dated "Entrada por ajuste de inventario (regularización)" is
+     *   recognised for the exact amount needed to keep the balance at zero. This
+     *   is the standard inventory-surplus adjustment treatment.
      * - Sale movements only count their `invoicePercentage`% portion (see
      *   {@link netEffect}); the remainder invoiced under the secondary document
-     *   never shows up, yet the balances still reconcile.
+     *   never shows up.
      *
      * Item-level movements are aggregated into one line per (product, document,
      * type, day). Source movements are read in pages so this scales to hundreds
@@ -237,11 +236,15 @@ module.exports = createCoreService(
 
       const requested = new Set(yearList);
       const minYear = yearList[0];
-      const minStart = moment.tz(`${minYear}-01-01 00:00:00`, TZ);
+      const maxYear = yearList[yearList.length - 1];
+      const maxEndExclusive = moment.tz(`${maxYear + 1}-01-01 00:00:00`, TZ);
 
+      // Read the full recorded history up to the last requested year so the
+      // Kardex can be reconstructed forward from zero (the company started with
+      // no inventory). No lower bound: balances begin at 0 at inception.
       const filters = {
         type: { $in: PHYSICAL_TYPES },
-        createdAt: { $gte: minStart.toISOString() },
+        createdAt: { $lt: maxEndExclusive.toISOString() },
       };
       if (productId) {
         filters.item = { product: { id: parseInt(productId, 10) } };
@@ -249,9 +252,7 @@ module.exports = createCoreService(
 
       // pid -> { code, name, unit }
       const productMeta = {};
-      // pid -> { year -> net effect } (every year present in the stream)
-      const effectsByYear = {};
-      // pid -> Map(year -> Map(bucketKey -> bucket))  (requested years only)
+      // pid -> Map(year -> Map(bucketKey -> bucket))  (all years, chronological)
       const bucketsByProduct = {};
       let skippedNoProduct = 0;
       let processed = 0;
@@ -298,46 +299,41 @@ module.exports = createCoreService(
           const yr = ts.year();
           const eff = netEffect(m);
 
-          if (!effectsByYear[pid]) effectsByYear[pid] = {};
-          effectsByYear[pid][yr] = (effectsByYear[pid][yr] || 0) + eff;
-
-          if (requested.has(yr)) {
-            if (!bucketsByProduct[pid]) bucketsByProduct[pid] = new Map();
-            let yearMap = bucketsByProduct[pid].get(yr);
-            if (!yearMap) {
-              yearMap = new Map();
-              bucketsByProduct[pid].set(yr, yearMap);
-            }
-            const day = ts.format("YYYY-MM-DD");
-            const orderId = m.order?.id || "-";
-            const key = `${orderId}|${m.type}|${day}`;
-            let b = yearMap.get(key);
-            if (!b) {
-              const tercero = pickTercero(m.order);
-              b = {
-                firstTs: ts.valueOf(),
-                day,
-                type: m.type,
-                document: m.order?.code || "",
-                invoice: invoiceLabel(m.order),
-                terceroNit: tercero.nit,
-                terceroName: tercero.name,
-                warehouses: new Set(),
-                sumDelta: 0,
-                transferAbs: 0,
-                itemCount: 0,
-              };
-              yearMap.set(key, b);
-            }
-            b.sumDelta += eff;
-            b.itemCount += 1;
-            if (m.type === INVENTORY_MOVEMENT_TYPES.TRANSFER) {
-              b.transferAbs += Math.abs(Number(m.quantity) || 0);
-            }
-            const wh = warehouseLabel(m);
-            if (wh) b.warehouses.add(wh);
-            if (ts.valueOf() < b.firstTs) b.firstTs = ts.valueOf();
+          if (!bucketsByProduct[pid]) bucketsByProduct[pid] = new Map();
+          let yearMap = bucketsByProduct[pid].get(yr);
+          if (!yearMap) {
+            yearMap = new Map();
+            bucketsByProduct[pid].set(yr, yearMap);
           }
+          const day = ts.format("YYYY-MM-DD");
+          const orderId = m.order?.id || "-";
+          const key = `${orderId}|${m.type}|${day}`;
+          let b = yearMap.get(key);
+          if (!b) {
+            const tercero = pickTercero(m.order);
+            b = {
+              firstTs: ts.valueOf(),
+              day,
+              type: m.type,
+              document: m.order?.code || "",
+              invoice: invoiceLabel(m.order),
+              terceroNit: tercero.nit,
+              terceroName: tercero.name,
+              warehouses: new Set(),
+              sumDelta: 0,
+              transferAbs: 0,
+              itemCount: 0,
+            };
+            yearMap.set(key, b);
+          }
+          b.sumDelta += eff;
+          b.itemCount += 1;
+          if (m.type === INVENTORY_MOVEMENT_TYPES.TRANSFER) {
+            b.transferAbs += Math.abs(Number(m.quantity) || 0);
+          }
+          const wh = warehouseLabel(m);
+          if (wh) b.warehouses.add(wh);
+          if (ts.valueOf() < b.firstTs) b.firstTs = ts.valueOf();
         }
 
         processed += page.length;
@@ -345,75 +341,71 @@ module.exports = createCoreService(
         start += PAGE_SIZE;
       }
 
-      // Current physical on-hand per product (items not sold/dropped). Anchors
-      // the closing balances to reality.
-      const stockByProduct = {};
-      try {
-        const knex = strapi.db.connection;
-        const q = knex("items as i")
-          .join("items_product_lnk as l", "l.item_id", "i.id")
-          .whereNotIn("i.state", ["sold", "dropped"])
-          .groupBy("l.product_id")
-          .select("l.product_id as productId")
-          .sum({ q: "i.current_quantity" });
-        if (productId) q.where("l.product_id", parseInt(productId, 10));
-        const stockRows = await q;
-        stockRows.forEach((r) => {
-          stockByProduct[r.productId] = Number(r.q) || 0;
-        });
-      } catch (e) {
-        strapi.log.warn(
-          `Kardex: no se pudo calcular el stock físico actual: ${e.message}`
-        );
-      }
-
-      // ── Per-product, per-year assembly ──────────────────────────────────────
-      // For each requested year the balance is anchored to the real physical
-      // stock: closing(Y) = stock_now − net movements after year Y, and
-      // opening(Y) = closing(Y) − entradas + salidas. This keeps the chain
-      // consistent (closing(Y) === opening(Y+1)).
-      //
-      // Where this would push any balance below zero (stock that left without a
-      // recorded outflow, plus the hidden secondary-document sales), we assume
-      // the missing quantity was already part of the opening stock: the whole
-      // product is shifted up by the minimum amount needed so no balance — in
-      // any year — is ever negative. The lift shows up in every year's opening,
-      // so the years still chain perfectly.
+      // ── Reconstrucción cronológica desde cero ───────────────────────────────
+      // La empresa inició sin inventario, por lo que cada producto arranca en
+      // saldo 0 y se reconstruye hacia adelante con los movimientos registrados.
+      // Cuando el saldo se iría por debajo de cero (mercancía que existía
+      // físicamente pero cuya compra/entrada no se registró durante el desorden
+      // inicial, más las ventas del documento secundario que no descargaron),
+      // se reconoce una "Entrada por ajuste de inventario (regularización)"
+      // fechada en ese momento, por la cantidad exacta para dejar el saldo en
+      // cero. Así los saldos nunca son negativos y la cadena se mantiene:
+      // closing(Y) === opening(Y+1).
+      const EPS = 0.0001;
       const perProduct = {};
+
       for (const pid of Object.keys(productMeta)) {
         const meta = productMeta[pid];
-        const eb = effectsByYear[pid] || {};
+        const yearsMap = bucketsByProduct[pid] || new Map();
+        const presentYears = Array.from(yearsMap.keys());
+        const firstYear = presentYears.length
+          ? Math.min(minYear, ...presentYears)
+          : minYear;
+
         const byYear = {};
-        let minBalance = Infinity;
+        let balance = 0;
 
-        for (const Y of yearList) {
-          let laterSum = 0;
-          for (const yrStr of Object.keys(eb)) {
-            if (Number(yrStr) > Y) laterSum += eb[yrStr];
-          }
-          const closingRaw = (stockByProduct[pid] || 0) - laterSum;
-
-          const yearMap = bucketsByProduct[pid]
-            ? bucketsByProduct[pid].get(Y)
-            : null;
+        for (let Y = firstYear; Y <= maxYear; Y++) {
+          const opening = balance;
+          const yearMap = yearsMap.get(Y);
           const buckets = yearMap
             ? Array.from(yearMap.values()).sort((a, b) => a.firstTs - b.firstTs)
             : [];
+
           let totalIn = 0;
           let totalOut = 0;
-          buckets.forEach((b) => {
-            if (b.sumDelta > 0) totalIn += b.sumDelta;
-            else totalOut += -b.sumDelta;
-          });
-          const openingRaw = closingRaw - totalIn + totalOut;
+          let totalAdjust = 0;
+          const rows = [];
 
-          minBalance = Math.min(minBalance, openingRaw);
-          let saldo = openingRaw;
-          const rows = buckets.map((b) => {
-            saldo += b.sumDelta;
-            minBalance = Math.min(minBalance, saldo);
+          for (const b of buckets) {
+            // Regularización si el movimiento dejaría el saldo negativo.
+            const tentative = balance + b.sumDelta;
+            if (tentative < -EPS) {
+              const reg = -tentative;
+              balance += reg;
+              totalAdjust += reg;
+              rows.push({
+                date: b.day,
+                type: "Ajuste de inventario",
+                document: "",
+                invoice: "",
+                terceroNit: "",
+                terceroName: "",
+                warehouse: "",
+                unit: meta.unit,
+                entrada: round(reg),
+                salida: 0,
+                saldo: round(balance),
+                notes:
+                  "Regularización: entrada de mercancía no registrada oportunamente",
+              });
+            }
+
+            balance += b.sumDelta;
             const entrada = b.sumDelta > 0 ? b.sumDelta : 0;
             const salida = b.sumDelta < 0 ? -b.sumDelta : 0;
+            totalIn += entrada;
+            totalOut += salida;
 
             const notesParts = [];
             if (b.transferAbs > 0) {
@@ -429,7 +421,7 @@ module.exports = createCoreService(
                 ? `${warehouse.slice(0, 2).join(", ")} +${warehouse.length - 2}`
                 : warehouse.join(", ");
 
-            return {
+            rows.push({
               date: b.day,
               type: TYPE_LABELS[b.type] || b.type,
               document: b.document,
@@ -440,60 +432,51 @@ module.exports = createCoreService(
               unit: meta.unit,
               entrada: round(entrada),
               salida: round(salida),
-              saldoRaw: saldo,
+              saldo: round(balance),
               notes: notesParts.join(" · "),
-            };
-          });
+            });
+          }
 
-          byYear[Y] = { openingRaw, closingRaw, totalIn, totalOut, rows };
+          if (requested.has(Y)) {
+            byYear[Y] = {
+              opening: round(opening),
+              closing: round(balance),
+              totalIn: round(totalIn),
+              totalOut: round(totalOut),
+              totalAdjust: round(totalAdjust),
+              rows,
+            };
+          }
         }
 
-        const lift = minBalance < 0 ? -minBalance : 0;
-        perProduct[pid] = { meta, byYear, lift };
+        perProduct[pid] = { meta, byYear };
       }
 
       const yearsOut = yearList.map((Y) => {
         const productsOut = [];
         for (const pid of Object.keys(perProduct)) {
-          const { meta, byYear, lift } = perProduct[pid];
+          const { meta, byYear } = perProduct[pid];
           const yd = byYear[Y];
-          const opening = round(yd.openingRaw + lift);
-          const closing = round(yd.closingRaw + lift);
-
+          if (!yd) continue;
           if (
             yd.rows.length === 0 &&
-            Math.abs(opening) < 0.0001 &&
-            Math.abs(closing) < 0.0001
+            Math.abs(yd.opening) < EPS &&
+            Math.abs(yd.closing) < EPS
           ) {
             continue;
           }
-
-          const rows = yd.rows.map((r) => ({
-            date: r.date,
-            type: r.type,
-            document: r.document,
-            invoice: r.invoice,
-            terceroNit: r.terceroNit,
-            terceroName: r.terceroName,
-            warehouse: r.warehouse,
-            unit: r.unit,
-            entrada: r.entrada,
-            salida: r.salida,
-            saldo: round(r.saldoRaw + lift),
-            notes: r.notes,
-          }));
-
           productsOut.push({
             productId: Number(pid),
             code: meta.code,
             name: meta.name,
             unit: meta.unit,
-            opening,
-            closing,
-            totalIn: round(yd.totalIn),
-            totalOut: round(yd.totalOut),
-            movementCount: rows.length,
-            rows,
+            opening: yd.opening,
+            closing: yd.closing,
+            totalIn: yd.totalIn,
+            totalOut: yd.totalOut,
+            totalAdjust: yd.totalAdjust,
+            movementCount: yd.rows.length,
+            rows: yd.rows,
           });
         }
 
@@ -507,6 +490,9 @@ module.exports = createCoreService(
           year: Y,
           totalProducts: productsOut.length,
           totalLines: productsOut.reduce((s, p) => s + p.movementCount, 0),
+          totalAdjust: round(
+            productsOut.reduce((s, p) => s + (p.totalAdjust || 0), 0)
+          ),
           products: productsOut,
         };
       });
@@ -519,6 +505,7 @@ module.exports = createCoreService(
           timezone: TZ,
           sourceMovements: processed,
           skippedNoProduct,
+          note: "La empresa inició operaciones en 2023 sin inventario (saldos iniciales en cero). El Kardex se reconstruye cronológicamente; las entradas de mercancía no registradas oportunamente durante la implementación del sistema se reconocen como ajustes de inventario por regularización. Los saldos nunca son negativos y el saldo final de cada año corresponde al saldo inicial del siguiente.",
         },
         years: yearsOut,
       };
@@ -686,6 +673,17 @@ module.exports = createCoreService(
       });
       sum.views = [{ state: "frozen", ySplit: 5 }];
 
+      // Nota metodológica (justificación contable).
+      if (meta.note) {
+        sr += 1;
+        sum.mergeCells(sr, 1, sr, Math.max(SUM_COLS, 4));
+        const noteCell = sum.getCell(sr, 1);
+        noteCell.value = `Nota: ${meta.note}`;
+        noteCell.font = { size: 8, italic: true, color: C.dark };
+        noteCell.alignment = { vertical: "top", horizontal: "left", wrapText: true, indent: 1 };
+        sum.getRow(sr).height = 56;
+      }
+
       // ── Una hoja de detalle por año ─────────────────────────────────────────
       const COLS = 12;
       const detailHeaders = [
@@ -803,7 +801,10 @@ module.exports = createCoreService(
           p.rows.forEach((rowData, idx) => {
             const r = ws.getRow(row++);
             r.height = 14;
-            const rowFill = fill(idx % 2 === 0 ? C.white : C.altRow);
+            const isAdjust = rowData.type === "Ajuste de inventario";
+            const rowFill = isAdjust
+              ? fill({ argb: "FFFEF3C7" })
+              : fill(idx % 2 === 0 ? C.white : C.altRow);
             const vals = [
               rowData.date,
               rowData.type,
