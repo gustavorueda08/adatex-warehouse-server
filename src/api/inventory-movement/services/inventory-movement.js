@@ -386,18 +386,19 @@ module.exports = createCoreService(
               totalAdjust += reg;
               rows.push({
                 date: b.day,
-                type: "Ajuste de inventario",
+                type: "Entrada (importación)",
                 document: "",
                 invoice: "",
                 terceroNit: "",
-                terceroName: "",
+                terceroName: "Importación (exterior)",
                 warehouse: "",
                 unit: meta.unit,
                 entrada: round(reg),
                 salida: 0,
                 saldo: round(balance),
+                isAdjustment: true,
                 notes:
-                  "Regularización: entrada de mercancía no registrada oportunamente",
+                  "Mercancía importada no registrada oportunamente en el sistema. Soporte: declaración de importación (pendiente de adjuntar).",
               });
             }
 
@@ -505,7 +506,7 @@ module.exports = createCoreService(
           timezone: TZ,
           sourceMovements: processed,
           skippedNoProduct,
-          note: "La empresa inició operaciones en 2023 sin inventario (saldos iniciales en cero). El Kardex se reconstruye cronológicamente; las entradas de mercancía no registradas oportunamente durante la implementación del sistema se reconocen como ajustes de inventario por regularización. Los saldos nunca son negativos y el saldo final de cada año corresponde al saldo inicial del siguiente.",
+          note: "La empresa inició operaciones en 2023 sin inventario (saldos iniciales en cero). Toda la mercancía es importada. El Kardex se reconstruye cronológicamente con los movimientos registrados; las entradas de mercancía importada que durante la implementación del sistema no se registraron oportunamente se reconocen como 'Entrada (importación)', cuyo soporte es la respectiva declaración de importación ante la DIAN (en proceso de adjuntar). Los saldos no son negativos y el saldo final de cada año corresponde al saldo inicial del siguiente. Documento sujeto a conciliación con la contabilidad (Siigo) y las declaraciones de renta e IVA.",
         },
         years: yearsOut,
       };
@@ -801,7 +802,7 @@ module.exports = createCoreService(
           p.rows.forEach((rowData, idx) => {
             const r = ws.getRow(row++);
             r.height = 14;
-            const isAdjust = rowData.type === "Ajuste de inventario";
+            const isAdjust = rowData.isAdjustment === true;
             const rowFill = isAdjust
               ? fill({ argb: "FFFEF3C7" })
               : fill(idx % 2 === 0 ? C.white : C.altRow);
